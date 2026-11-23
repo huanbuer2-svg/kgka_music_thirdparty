@@ -150,7 +150,8 @@ class DownloadService {
 
   /// 文件命名：{歌手}-{歌曲名}.{ext}
   String fileNameFor(Song song, AudioQuality quality) {
-    final ext = quality == AudioQuality.lossless ? 'flac' : 'mp3';
+    // 无损及以上（flac / hi-res / master）都落到 flac 容器
+    final ext = quality.index >= AudioQuality.lossless.index ? 'flac' : 'mp3';
     final safeArtist = _sanitizeFileName(song.artist);
     final safeTitle = _sanitizeFileName(song.title);
     final name = (safeArtist.isNotEmpty && safeTitle.isNotEmpty)

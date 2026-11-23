@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:audio_session/audio_session.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
@@ -262,6 +263,7 @@ class PlayerController extends ChangeNotifier {
     Future<AudioSession> Function()? audioSessionProvider,
   }) : _audioSessionProvider =
            audioSessionProvider ?? (() => AudioSession.instance) {
+    _listenConnectivity();
     final settingsRestore = _restoreSettings();
     unawaited(settingsRestore);
     unawaited(_superLyric.registerPublisher());
@@ -453,6 +455,36 @@ class PlayerController extends ChangeNotifier {
   bool lyricBlurEnabled = false;
   bool playerGameEnabled = true;
   AudioQuality audioQuality = AudioQuality.standard;
+
+  /// 当前是否在移动网络（蜂窝数据）上。
+  bool _onCellular = false;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
+  /// 实际用于播放的音质。
+  ///
+  /// 开启「按网络类型选择音质」后，蜂窝网络下自动降一档，避免用流量拉无损；
+  /// 用户设置本身不变，回到 Wi‑Fi 又会用回原档位。
+  AudioQuality get effectiveAudioQuality {
+    if (!CustomSourceManager.instance.networkAwareQuality) return audioQuality;
+    if (!_onCellular) return audioQuality;
+    return _nextLowerQuality(audioQuality) ?? audioQuality;
+  }
+
+  void _listenConnectivity() {
+    try {
+      final connectivity = Connectivity();
+      unawaited(
+        connectivity.checkConnectivity().then((results) {
+          _onCellular = results.contains(ConnectivityResult.mobile);
+        }).catchError((Object _) {}),
+      );
+      _connectivitySub = connectivity.onConnectivityChanged.listen((results) {
+        _onCellular = results.contains(ConnectivityResult.mobile);
+      }, onError: (Object _) {});
+    } catch (error) {
+      debugPrint('[KA Music][network] 网络类型监听不可用: $error');
+    }
+  }
 
   bool get isPersonalFmActive => _isPersonalFmActive;
 
@@ -997,11 +1029,13 @@ class PlayerController extends ChangeNotifier {
 
   /// 解析播放地址（含第三方音源介入）。
   ///
-  /// 顺序取决于「设置 → 第三方音源」里的策略：
-  /// - [CustomSourceMode.prefer]：先问第三方脚本，失败再回退官方接口
-  /// - [CustomSourceMode.only]：只认第三方脚本，失败直接报错
-  /// - [CustomSourceMode.fallback]：先走官方接口，取不到地址时才用第三方
-  /// - [CustomSourceMode.off] / 没有启用脚本：完全走官方接口
+  /// 顺序取决于「音源与音质」里选的播放来源：
+  /// - [CustomSourceMode.thirdParty]：只用第三方脚本，失败直接报错
+  /// - [CustomSourceMode.official]：只用官方接口
+  /// - [CustomSourceMode.auto]：官方优先，官方报错或返回空地址时换第三方
+  ///
+  /// 都拿不到地址时，若开了「播放失败时切换平台」，会拿歌名重新搜一首同名歌曲
+  /// 再解析一次（换 hash / 换音源，不改变用户当前播放列表）。
   Future<PlayUrl> _resolvePlayUrl(Song song) async {
     final custom = CustomSourceManager.instance;
     // 云盘歌曲是用户自己上传的文件，第三方音源不可能有，直接排除
@@ -1009,47 +1043,112 @@ class PlayerController extends ChangeNotifier {
         !song.isCloudDrive &&
         CustomSourceManager.platformKeyOf(song) != null;
 
-    if (canUseCustom &&
-        (custom.mode == CustomSourceMode.prefer ||
-            custom.mode == CustomSourceMode.only)) {
-      try {
-        final resolved = await custom.resolve(
-          song,
-          appQuality: audioQuality.apiValue,
-        );
-        debugPrint(
-          '[KA Music][custom-source] ${resolved.scriptName} 提供 '
-          '${resolved.sourceLabel} ${resolved.quality} 地址',
-        );
-        return PlayUrl(url: resolved.url, hash: song.hash);
-      } catch (error) {
-        if (custom.mode == CustomSourceMode.only) {
-          throw Exception('第三方音源解析失败：$error');
+    PlayUrl? primary;
+    Object? primaryError;
+    try {
+      primary = await _resolveByMode(song, custom, canUseCustom);
+      if (primary.url.isNotEmpty) return primary;
+    } catch (error) {
+      primaryError = error;
+    }
+
+    if (custom.switchPlatformOnFailure) {
+      final alternate = await _findAlternateSong(song);
+      if (alternate != null) {
+        try {
+          final retried = await _resolveByMode(alternate, custom, canUseCustom);
+          if (retried.url.isNotEmpty) {
+            debugPrint(
+              '[KA Music][switch-platform] ${song.title} 解析失败，'
+              '已换成 ${alternate.title}（${alternate.hash}）',
+            );
+            return retried;
+          }
+        } catch (error) {
+          debugPrint('[KA Music][switch-platform] 换源也失败：$error');
         }
-        debugPrint('[KA Music][custom-source] 第三方优先失败，回退官方：$error');
       }
     }
 
-    final official = await _resolveOfficialPlayUrl(song);
+    if (primary != null) return primary;
+    throw primaryError ?? Exception('这首歌暂时没有可播放地址');
+  }
+
+  /// 按当前播放来源策略解析一次。
+  Future<PlayUrl> _resolveByMode(
+    Song song,
+    CustomSourceManager custom,
+    bool canUseCustom,
+  ) async {
+    if (canUseCustom && custom.mode == CustomSourceMode.thirdParty) {
+      return _resolveViaCustomSource(song, custom);
+    }
+
+    final PlayUrl official;
+    try {
+      official = await _resolveOfficialPlayUrl(song);
+    } catch (error) {
+      if (!canUseCustom || custom.mode != CustomSourceMode.auto) rethrow;
+      debugPrint('[KA Music][custom-source] 官方解析失败，改用第三方：$error');
+      return _resolveViaCustomSource(song, custom);
+    }
 
     if (canUseCustom &&
-        custom.mode == CustomSourceMode.fallback &&
+        custom.mode == CustomSourceMode.auto &&
         official.url.isEmpty) {
       try {
-        final resolved = await custom.resolve(
-          song,
-          appQuality: audioQuality.apiValue,
-        );
-        debugPrint(
-          '[KA Music][custom-source] 官方无地址，改用 ${resolved.scriptName}',
-        );
-        return PlayUrl(url: resolved.url, hash: song.hash);
+        return await _resolveViaCustomSource(song, custom);
       } catch (error) {
         debugPrint('[KA Music][custom-source] 官方无地址且第三方失败：$error');
       }
     }
 
     return official;
+  }
+
+  /// 换一首同名歌曲（「播放失败时切换平台」用）。
+  ///
+  /// 只做保守匹配：去掉括号里的版本后缀后主体歌名必须完全一致，避免把用户
+  /// 想听的录音室版换成翻唱或 Live。
+  Future<Song?> _findAlternateSong(Song song) async {
+    final keyword = '${song.title} ${song.artist}'.trim();
+    if (keyword.isEmpty) return null;
+    try {
+      final results = await _api.searchSongs(keyword, pageSize: 8);
+      final target = _normalizeSongTitle(song.title);
+      if (target.isEmpty) return null;
+      for (final candidate in results) {
+        if (candidate.hash == song.hash) continue;
+        if (_normalizeSongTitle(candidate.title) != target) continue;
+        return candidate;
+      }
+    } catch (error) {
+      debugPrint('[KA Music][switch-platform] 搜索同名歌曲失败：$error');
+    }
+    return null;
+  }
+
+  String _normalizeSongTitle(String title) {
+    return title
+        .replaceAll(RegExp(r'[（(\[].*?[)）\]]'), '')
+        .replaceAll(RegExp(r'\s+'), '')
+        .toLowerCase();
+  }
+
+  /// 走第三方音源脚本解析，成功时打一条日志。
+  Future<PlayUrl> _resolveViaCustomSource(
+    Song song,
+    CustomSourceManager custom,
+  ) async {
+    final resolved = await custom.resolve(
+      song,
+      appQuality: effectiveAudioQuality.apiValue,
+    );
+    debugPrint(
+      '[KA Music][custom-source] ${resolved.scriptName} 提供 '
+      '${resolved.sourceLabel} ${resolved.quality} 地址',
+    );
+    return PlayUrl(url: resolved.url, hash: song.hash);
   }
 
   /// 官方接口解析播放地址。
@@ -1076,14 +1175,14 @@ class PlayerController extends ChangeNotifier {
     try {
       final playUrl = await _api.songUrl(
         song,
-        quality: audioQuality,
+        quality: effectiveAudioQuality,
         hashOnly: _isPersonalFmActive,
       );
       if (playUrl.url.isNotEmpty || !smartQualityEnabled) {
         return playUrl;
       }
       // 返回空地址：按智能音质策略降级重试
-      final fallback = _nextLowerQuality(audioQuality);
+      final fallback = _nextLowerQuality(effectiveAudioQuality);
       if (fallback == null) return playUrl;
       return await _api.songUrl(
         song,
@@ -1093,7 +1192,7 @@ class PlayerController extends ChangeNotifier {
     } catch (error) {
       if (!smartQualityEnabled) rethrow;
       // 网络请求失败：尝试降级重试
-      final fallback = _nextLowerQuality(audioQuality);
+      final fallback = _nextLowerQuality(effectiveAudioQuality);
       if (fallback == null) rethrow;
       try {
         final retryUrl = await _api.songUrl(
@@ -1103,7 +1202,7 @@ class PlayerController extends ChangeNotifier {
         );
         if (retryUrl.url.isNotEmpty) {
           debugPrint(
-            '[KA Music][smart-quality] ${audioQuality.badge} 失败，'
+            '[KA Music][smart-quality] ${effectiveAudioQuality.badge} 失败，'
             '已降级为 ${fallback.badge}',
           );
           return retryUrl;
@@ -1116,15 +1215,12 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// 返回更低一档的音质；已是最低档时返回 null。
+  ///
+  /// 枚举顺序即由低到高，所以直接取前一个即可，新增档位不用改这里。
   AudioQuality? _nextLowerQuality(AudioQuality quality) {
-    switch (quality) {
-      case AudioQuality.lossless:
-        return AudioQuality.high;
-      case AudioQuality.high:
-        return AudioQuality.standard;
-      case AudioQuality.standard:
-        return null;
-    }
+    final index = quality.index;
+    if (index <= 0) return null;
+    return AudioQuality.values[index - 1];
   }
 
   Future<bool> addToQueue(Song song) async {
@@ -3014,6 +3110,7 @@ class PlayerController extends ChangeNotifier {
     _bluetoothAnnounceTimer?.cancel();
     _autoResumeTimer?.cancel();
     _sleepTimer?.cancel();
+    _connectivitySub?.cancel();
     _positionSub.cancel();
     _durationSub.cancel();
     _stateSub.cancel();

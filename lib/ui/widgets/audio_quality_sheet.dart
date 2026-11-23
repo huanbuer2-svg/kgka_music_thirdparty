@@ -93,5 +93,7 @@ IconData _iconForQuality(AudioQuality quality) {
     AudioQuality.standard => Icons.music_note_rounded,
     AudioQuality.high => Icons.high_quality_rounded,
     AudioQuality.lossless => Icons.graphic_eq_rounded,
+    AudioQuality.hiRes => Icons.surround_sound_rounded,
+    AudioQuality.master => Icons.workspace_premium_rounded,
   };
 }

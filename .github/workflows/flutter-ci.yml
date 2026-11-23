@@ -112,7 +112,9 @@ jobs:
         run: |
           if [[ -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
             if [[ -n "$KEYSTORE_B64" ]]; then
-              echo "$KEYSTORE_B64" | base64 -d > android/release.keystore
+              # 写在项目根：build.gradle.kts 里 rootProject 指向 android/，
+              # 所以 storeFile 的 ../release.keystore 才解析到项目根的这个文件
+              echo "$KEYSTORE_B64" | base64 -d > release.keystore
               STORE_FILE="../release.keystore"
             else
               STORE_FILE="../buildKey.keystore"

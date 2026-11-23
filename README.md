@@ -2,7 +2,7 @@
   <img src="lib/assets/logo.png" alt="KA Music Logo" width="120" height="120" />
 </p>
 
-<h1 align="center">KA Music</h1>
+<h1 align="center">贰悅</h1>
 
 <p align="center">
   <strong>一个精致的第三方音乐客户端</strong>

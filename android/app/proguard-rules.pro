@@ -23,7 +23,7 @@
 -keep class * implements android.os.Handler$Callback
 
 # 项目自身通过 MethodChannel 调用的原生实现（kgka_music_hl/screen 等）
--keep class com.hoilai.mm.music.** { *; }
+-keep class com.eryue.music.** { *; }
 
 # 序列化与注解需要保留运行时元数据
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod

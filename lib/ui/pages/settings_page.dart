@@ -5,6 +5,7 @@ import '../design_tokens.dart';
 import '../widgets/status_bar_overlay.dart';
 
 import '../../config/app_config.dart';
+import '../../models/music_models.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -13,9 +14,9 @@ import '../../controllers/local_music_controller.dart';
 import '../../services/app_update_service.dart';
 import '../../services/cache_service.dart';
 import '../../services/custom_source/custom_source_manager.dart';
+import '../../services/custom_source/lx_script.dart';
 import '../../services/music_api.dart';
 import '../widgets/audio_effects_sheet.dart';
-import '../widgets/audio_quality_sheet.dart';
 import '../widgets/toast.dart';
 import 'about_page.dart';
 import 'custom_source_page.dart';
@@ -243,6 +244,7 @@ class SettingsPage extends StatelessWidget {
               auth,
               auth.vipClaim,
               player,
+              CustomSourceManager.instance,
               ?localMusic,
               theme,
             ]),
@@ -300,19 +302,16 @@ class SettingsPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 24),
+                // 音源与音质
+                _SectionHeader(title: '音源与音质'),
+                const SizedBox(height: 8),
+                _buildSourceQualityCard(context),
+                const SizedBox(height: 24),
                 // Playback section
                 _SectionHeader(title: '播放'),
                 const SizedBox(height: 8),
                 _SettingsCard(
                   children: [
-                    _SettingsTile(
-                      icon: Icons.high_quality_rounded,
-                      iconColor: colorScheme.primary,
-                      title: '默认音质',
-                      subtitle: player.audioQuality.label,
-                      onTap: () => _selectDefaultAudioQuality(context),
-                    ),
-                    _SettingsDivider(),
                     _SettingsSwitchTile(
                       icon: Icons.auto_awesome_rounded,
                       iconColor: colorScheme.primary,
@@ -320,21 +319,6 @@ class SettingsPage extends StatelessWidget {
                       subtitle: '播放失败时自动降级音质重试',
                       value: player.smartQualityEnabled,
                       onChanged: player.setSmartQualityEnabled,
-                    ),
-                    _SettingsDivider(),
-                    AnimatedBuilder(
-                      animation: CustomSourceManager.instance,
-                      builder: (context, _) => _SettingsTile(
-                        icon: Icons.extension_rounded,
-                        iconColor: colorScheme.primary,
-                        title: '第三方音源',
-                        subtitle: _customSourceSummary(),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const CustomSourcePage(),
-                          ),
-                        ),
-                      ),
                     ),
                     _SettingsDivider(),
                     _SettingsSwitchTile(
@@ -665,15 +649,201 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  /// 第三方音源入口的一行摘要。
-  String _customSourceSummary() {
+  /// 「音源与音质」卡片：播放来源 + 官方音质 + 第三方音质 + 两个行为开关。
+  Widget _buildSourceQualityCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final manager = CustomSourceManager.instance;
-    if (manager.mode == CustomSourceMode.off) return '已关闭';
-    final enabled = manager.scripts
+    final enabledCount = manager.scripts
         .where((script) => script.enabled && script.sources.isNotEmpty)
         .length;
-    if (enabled == 0) return '未导入音源';
-    return '$enabled 个音源 · ${manager.mode.label}';
+
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.graphic_eq_rounded, color: scheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  '音源与音质',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '统一音质',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _cardGroupTitle(context, '播放来源'),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<CustomSourceMode>(
+                segments: [
+                  for (final mode in CustomSourceMode.values)
+                    ButtonSegment<CustomSourceMode>(
+                      value: mode,
+                      label: Text(
+                        mode.label,
+                        style: const TextStyle(fontSize: 12.5),
+                      ),
+                    ),
+                ],
+                selected: {manager.mode},
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onSelectionChanged: (selection) =>
+                    manager.setMode(selection.first),
+              ),
+            ),
+            const SizedBox(height: 6),
+            _cardHint(context, _modeHint(manager.mode)),
+            const SizedBox(height: 4),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.network_cell_rounded, color: scheme.primary),
+              title: const Text('按网络类型选择音质'),
+              subtitle: const Text('移动网络下自动降一档，避免用流量拉无损'),
+              value: manager.networkAwareQuality,
+              onChanged: manager.setNetworkAwareQuality,
+            ),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            _cardGroupTitle(context, '播放音质'),
+            const SizedBox(height: 2),
+            _cardHint(context, '按列表选择，无法使用时由平台自动降级。'),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final quality in AudioQuality.values)
+                  _qualityChip(
+                    context,
+                    label: quality.label,
+                    selected: player.audioQuality == quality,
+                    onTap: () => player.setAudioQuality(quality),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _cardGroupTitle(context, '第三方音源音质'),
+            const SizedBox(height: 2),
+            _cardHint(context, '只对第三方脚本生效，脚本不支持时会自动退到它声明的档位。'),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final quality in ThirdPartyQuality.values)
+                  _qualityChip(
+                    context,
+                    label: quality.label,
+                    selected: manager.quality == quality,
+                    onTap: () => manager.setQuality(quality),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.swap_horiz_rounded, color: scheme.primary),
+              title: const Text('播放失败时切换平台'),
+              subtitle: const Text('当前平台及其音源失败后，去别的平台找同一首歌再试一次'),
+              value: manager.switchPlatformOnFailure,
+              onChanged: manager.setSwitchPlatformOnFailure,
+            ),
+            const Divider(height: 1),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.extension_rounded, color: scheme.primary),
+              title: const Text('管理 / 导入音源'),
+              subtitle: Text(
+                enabledCount == 0 ? '还没有导入音源' : '已启用 $enabledCount 个音源',
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CustomSourcePage()),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _cardGroupTitle(BuildContext context, String text) {
+    return Text(
+      text,
+      style: Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+
+  Widget _cardHint(BuildContext context, String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 11.5,
+        height: 1.5,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+
+  Widget _qualityChip(
+    BuildContext context, {
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          color: selected ? scheme.onPrimaryContainer : scheme.onSurface,
+        ),
+      ),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      showCheckmark: false,
+      selectedColor: scheme.primaryContainer,
+      backgroundColor: scheme.surfaceContainerHighest.withValues(alpha: 0.7),
+      side: BorderSide.none,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  String _modeHint(CustomSourceMode mode) {
+    switch (mode) {
+      case CustomSourceMode.auto:
+        return '官方接口优先，官方失败或没有地址时自动换第三方音源。';
+      case CustomSourceMode.official:
+        return '只使用官方接口，不使用第三方音源。';
+      case CustomSourceMode.thirdParty:
+        return '只使用已启用的第三方音源。';
+    }
   }
 
   String _audioInterruptionSummary(PlayerController player) {
@@ -681,17 +851,6 @@ class SettingsPage extends StatelessWidget {
     if (!player.audioInterruptionEnabled) parts.add('已阻止打断');
     if (player.autoResumeAfterInterruption) parts.add('自动恢复');
     return parts.isEmpty ? '未开启' : parts.join(' · ');
-  }
-
-  Future<void> _selectDefaultAudioQuality(BuildContext context) async {
-    final quality = await showAudioQualitySheet(
-      context: context,
-      selected: player.audioQuality,
-      title: '默认音质',
-      subtitle: '新播放的歌曲会使用这个音质',
-    );
-    if (quality == null) return;
-    await player.setAudioQuality(quality);
   }
 
   /// 打开缓存管理 BottomSheet。

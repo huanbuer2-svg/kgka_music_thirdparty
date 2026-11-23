@@ -23,7 +23,7 @@ fun hasReleaseSigning(): Boolean = keystorePropertiesFile.exists() &&
     !keystoreProperties.getProperty("keyPassword").isNullOrBlank()
 
 android {
-    namespace = "com.hoilai.mm.music"
+    namespace = "com.eryue.music"
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
@@ -46,7 +46,7 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         val customPkg = (project.findProperty("customPackageName") as? String)?.trim()
-        applicationId = if (!customPkg.isNullOrEmpty()) customPkg else "com.hoilai.mm.music"
+        applicationId = if (!customPkg.isNullOrEmpty()) customPkg else "com.eryue.music"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         // 不能用 flutter.minSdkVersion（CI 的 Flutter 3.47.1 解析为 24）：

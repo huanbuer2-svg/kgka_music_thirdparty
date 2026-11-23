@@ -11,21 +11,33 @@ import 'lx_script.dart';
 
 /// 自定义音源在播放链路里的介入方式。
 enum CustomSourceMode {
-  /// 完全关闭，只用官方接口。
-  off('关闭'),
+  /// 官方接口优先，取不到地址时自动换第三方音源。
+  auto('自动'),
 
-  /// 官方接口优先，取不到地址（空地址 / 报错）时才用第三方音源。
-  fallback('官方优先'),
+  /// 只用官方接口。
+  official('官方'),
 
-  /// 第三方音源优先，失败再回退官方接口。
-  prefer('第三方优先'),
-
-  /// 只用第三方音源，失败直接报错。
-  only('仅第三方');
+  /// 只用第三方音源。
+  thirdParty('第三方');
 
   const CustomSourceMode(this.label);
 
   final String label;
+
+  /// 兼容旧版本持久化过的 `off / fallback / prefer / only`。
+  static CustomSourceMode fromName(String? name) {
+    switch (name) {
+      case 'official':
+      case 'off':
+        return official;
+      case 'thirdParty':
+      case 'only':
+      case 'prefer':
+        return thirdParty;
+      default:
+        return auto;
+    }
+  }
 }
 
 /// 一次成功的第三方音源解析结果。
@@ -75,12 +87,27 @@ class CustomSourceManager extends ChangeNotifier {
   final List<String> _logLines = [];
   final http.Client _http = http.Client();
 
-  CustomSourceMode _mode = CustomSourceMode.fallback;
+  CustomSourceMode _mode = CustomSourceMode.auto;
+
+  /// 用户在「第三方音源音质」里单独选的档位。
+  ThirdPartyQuality _quality = ThirdPartyQuality.master;
+
+  /// 移动网络下自动降一档音质，避免用流量拉无损。
+  bool _networkAwareQuality = false;
+
+  /// 当前平台取不到地址时，去别的平台找同一首歌。
+  bool _switchPlatformOnFailure = false;
   bool _initialized = false;
 
   List<CustomSourceScript> get scripts => List.unmodifiable(_scripts);
 
   CustomSourceMode get mode => _mode;
+
+  ThirdPartyQuality get quality => _quality;
+
+  bool get networkAwareQuality => _networkAwareQuality;
+
+  bool get switchPlatformOnFailure => _switchPlatformOnFailure;
 
   bool get isInitialized => _initialized;
 
@@ -89,7 +116,7 @@ class CustomSourceManager extends ChangeNotifier {
       _scripts.any((script) => script.enabled && script.sources.isNotEmpty);
 
   /// 是否应该在播放链路里介入。
-  bool get isActive => _mode != CustomSourceMode.off && hasEnabledScript;
+  bool get isActive => _mode != CustomSourceMode.official && hasEnabledScript;
 
   /// 最近日志（新的在后）。
   List<String> get recentLogs => List.unmodifiable(_logLines);
@@ -105,10 +132,11 @@ class CustomSourceManager extends ChangeNotifier {
         final decoded = jsonDecode(raw);
         if (decoded is Map) {
           final modeName = decoded['mode'];
-          _mode = CustomSourceMode.values.firstWhere(
-            (item) => item.name == modeName,
-            orElse: () => CustomSourceMode.fallback,
-          );
+          _mode = CustomSourceMode.fromName(modeName as String?);
+          _quality = ThirdPartyQuality.fromLxValue(decoded['quality'] as String?) ??
+              ThirdPartyQuality.master;
+          _networkAwareQuality = decoded['networkAwareQuality'] == true;
+          _switchPlatformOnFailure = decoded['switchPlatformOnFailure'] == true;
           final list = decoded['scripts'];
           if (list is List) {
             for (final item in list) {
@@ -137,6 +165,9 @@ class CustomSourceManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final payload = jsonEncode({
         'mode': _mode.name,
+        'quality': _quality.lxValue,
+        'networkAwareQuality': _networkAwareQuality,
+        'switchPlatformOnFailure': _switchPlatformOnFailure,
         'scripts': _scripts.map((script) => script.toJson()).toList(),
       });
       await prefs.setString(_prefsKey, payload);
@@ -251,6 +282,29 @@ class CustomSourceManager extends ChangeNotifier {
   Future<void> setMode(CustomSourceMode mode) async {
     if (_mode == mode) return;
     _mode = mode;
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> setNetworkAwareQuality(bool value) async {
+    if (_networkAwareQuality == value) return;
+    _networkAwareQuality = value;
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> setSwitchPlatformOnFailure(bool value) async {
+    if (_switchPlatformOnFailure == value) return;
+    _switchPlatformOnFailure = value;
+    await _persist();
+    notifyListeners();
+  }
+
+  /// 切换第三方音源音质档位。
+  Future<void> setQuality(ThirdPartyQuality quality) async {
+    if (_quality == quality) return;
+    _quality = quality;
     _cache.clear();
     await _persist();
     notifyListeners();
@@ -372,7 +426,11 @@ class CustomSourceManager extends ChangeNotifier {
     for (final script in candidates) {
       final decl = script.sources[platform];
       if (decl == null || !decl.canResolveUrl) continue;
-      final quality = pickLxQuality(decl.qualitys, appQuality);
+      final quality = pickLxQuality(
+        decl.qualitys,
+        appQuality,
+        preferred: _quality.lxValue,
+      );
       try {
         final runtime = await _runtimeFor(script);
         final url = await runtime.fetchMusicUrl(

@@ -237,13 +237,41 @@ class LxScriptMeta {
   }
 }
 
-/// 音质档位：把 App 的音质设置折算成 lx 脚本认识的档位。
+/// 第三方音源单独的音质档位。
 ///
-/// 脚本对档位的要求不一致（酷狗系常见 128k/320k/flac，QQ 系还有 atmos /
-/// master），因此这里只做「从高到低」的偏好排序，由调用方在脚本声明里
-/// 挑第一个可用的档位。
+/// 脚本声明的 `qualitys` 用的是 lx-music 的字符串（`flac24bit` / `hires` /
+/// `atmos` / `master` …），和官方接口的 128/320/flac 不是一套体系，
+/// 所以单独给一份用户偏好，不必跟着官方音质走。
+enum ThirdPartyQuality {
+  bit24('flac24bit', '24位', '24BIT'),
+  hiRes('hires', 'Hi-Res', 'HI-RES'),
+  atmos('atmos', 'Atmos', 'ATMOS'),
+  atmosPlus('atmos_plus', 'Atmos+', 'ATMOS+'),
+  master('master', 'Master', 'MASTER');
+
+  const ThirdPartyQuality(this.lxValue, this.label, this.badge);
+
+  /// 写进脚本 `info.type` 的值。
+  final String lxValue;
+  final String label;
+  final String badge;
+
+  static ThirdPartyQuality? fromLxValue(String? value) {
+    if (value == null || value.isEmpty) return null;
+    for (final quality in ThirdPartyQuality.values) {
+      if (quality.lxValue == value) return quality;
+    }
+    return null;
+  }
+}
+
+/// App 音质设置 → 候选的 lx 脚本音质档位（从高到低）。
 List<String> lxQualityPreference(String appQuality) {
   switch (appQuality) {
+    case 'master':
+      return const ['master', 'hires', 'flac24bit', 'flac', '320k', '128k'];
+    case 'hires':
+      return const ['hires', 'flac24bit', 'flac', '320k', '128k'];
     case 'flac':
       return const ['flac', 'flac24bit', 'hires', '320k', '128k'];
     case '320':
@@ -253,9 +281,23 @@ List<String> lxQualityPreference(String appQuality) {
   }
 }
 
-/// 在脚本声明的音质里挑一个最接近 App 设置的档位。
-String pickLxQuality(List<String> declared, String appQuality) {
-  if (declared.isEmpty) return lxQualityPreference(appQuality).first;
+/// 在脚本声明的音质里挑一个最合适的档位。
+///
+/// [preferred] 是用户在「第三方音源音质」里单独选的档位，只要脚本支持就优先用；
+/// 否则退回按 App 音质推导的偏好链。
+String pickLxQuality(
+  List<String> declared,
+  String appQuality, {
+  String? preferred,
+}) {
+  if (declared.isEmpty) {
+    return preferred ?? lxQualityPreference(appQuality).first;
+  }
+  if (preferred != null &&
+      preferred.isNotEmpty &&
+      declared.contains(preferred)) {
+    return preferred;
+  }
   for (final candidate in lxQualityPreference(appQuality)) {
     if (declared.contains(candidate)) return candidate;
   }

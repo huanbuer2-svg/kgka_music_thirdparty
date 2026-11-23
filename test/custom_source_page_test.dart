@@ -31,7 +31,7 @@ void main() {
       expect(manager.mode, mode, reason: '点击「${mode.label}」后策略应生效');
     }
     // 复位，避免影响其他用例
-    await manager.setMode(CustomSourceMode.fallback);
+    await manager.setMode(CustomSourceMode.auto);
   });
 
   testWidgets('导入对话框可以打开并取消', (tester) async {

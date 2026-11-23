@@ -97,15 +97,25 @@ class MobileLoginAccount {
 }
 
 enum AudioQuality {
-  standard('128', '标准音质', '128K'),
-  high('320', '高品音质', '320K'),
-  lossless('flac', '无损音质', 'FLAC');
+  standard('128', '更高', '128K'),
+  high('320', '极高', '320K'),
+  lossless('flac', '无损', 'FLAC'),
+  hiRes('hires', 'Hi-Res', 'HI-RES'),
+  master('master', 'Master', 'MASTER');
 
   const AudioQuality(this.apiValue, this.label, this.badge);
 
+  /// 传给 `/song/url` 的 quality 参数。
   final String apiValue;
+
+  /// 界面上的短名称（与酷狗客户端的分级一致）。
   final String label;
+
+  /// 技术标识，用在降级日志与下载文件名里。
   final String badge;
+
+  /// 档位由低到高的序号，降级链按它递减。
+  int get level => index;
 
   static AudioQuality fromApiValue(String? value) {
     for (final quality in AudioQuality.values) {

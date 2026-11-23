@@ -387,14 +387,12 @@ class _CustomSourcePageState extends State<CustomSourcePage> {
 
   String _modeDescription(CustomSourceMode mode) {
     switch (mode) {
-      case CustomSourceMode.off:
-        return '不使用任何第三方音源，全部走官方接口。';
-      case CustomSourceMode.fallback:
-        return '官方接口拿不到播放地址时，才用第三方音源兜底。';
-      case CustomSourceMode.prefer:
-        return '先问第三方音源，成功了就用它；失败再回退官方接口。';
-      case CustomSourceMode.only:
-        return '只用第三方音源，解析失败直接报错（不影响已下载的歌曲）。';
+      case CustomSourceMode.auto:
+        return '官方接口优先，官方失败或没有地址时自动换第三方音源。';
+      case CustomSourceMode.official:
+        return '只使用官方接口，不使用第三方音源。';
+      case CustomSourceMode.thirdParty:
+        return '只使用已启用的第三方音源，解析失败直接报错。';
     }
   }
 
