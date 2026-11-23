@@ -1,0 +1,479 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../models/music_models.dart';
+import 'lx_runtime.dart';
+import 'lx_script.dart';
+
+/// 自定义音源在播放链路里的介入方式。
+enum CustomSourceMode {
+  /// 完全关闭，只用官方接口。
+  off('关闭'),
+
+  /// 官方接口优先，取不到地址（空地址 / 报错）时才用第三方音源。
+  fallback('官方优先'),
+
+  /// 第三方音源优先，失败再回退官方接口。
+  prefer('第三方优先'),
+
+  /// 只用第三方音源，失败直接报错。
+  only('仅第三方');
+
+  const CustomSourceMode(this.label);
+
+  final String label;
+}
+
+/// 一次成功的第三方音源解析结果。
+class CustomSourceResolve {
+  const CustomSourceResolve({
+    required this.url,
+    required this.scriptName,
+    required this.sourceKey,
+    required this.quality,
+  });
+
+  final String url;
+  final String scriptName;
+  final String sourceKey;
+  final String quality;
+
+  String get sourceLabel => lxSourceLabels[sourceKey] ?? sourceKey;
+}
+
+class _CacheEntry {
+  _CacheEntry(this.resolve, this.createdAt);
+
+  final CustomSourceResolve resolve;
+  final DateTime createdAt;
+}
+
+/// 第三方音源（lx-music 自定义源脚本）管理器。
+///
+/// 职责：
+/// - 脚本的导入 / 启用 / 排序 / 删除与本地持久化
+/// - 按歌曲来源挑选合适的脚本并解析出播放地址（带内存缓存与多脚本降级）
+/// - 向界面暴露运行日志
+///
+/// 全局单例，因为播放器（[PlayerController]）和设置页都要访问同一份状态。
+class CustomSourceManager extends ChangeNotifier {
+  CustomSourceManager._();
+
+  static final CustomSourceManager instance = CustomSourceManager._();
+
+  static const String _prefsKey = 'kgka_custom_sources_v1';
+  static const Duration _cacheTtl = Duration(minutes: 10);
+  static const int _cacheLimit = 120;
+
+  final List<CustomSourceScript> _scripts = [];
+  final Map<String, LxRuntime> _runtimes = {};
+  final Map<String, _CacheEntry> _cache = {};
+  final List<String> _logLines = [];
+  final http.Client _http = http.Client();
+
+  CustomSourceMode _mode = CustomSourceMode.fallback;
+  bool _initialized = false;
+
+  List<CustomSourceScript> get scripts => List.unmodifiable(_scripts);
+
+  CustomSourceMode get mode => _mode;
+
+  bool get isInitialized => _initialized;
+
+  /// 至少有一个启用中的脚本才认为功能可用。
+  bool get hasEnabledScript =>
+      _scripts.any((script) => script.enabled && script.sources.isNotEmpty);
+
+  /// 是否应该在播放链路里介入。
+  bool get isActive => _mode != CustomSourceMode.off && hasEnabledScript;
+
+  /// 最近日志（新的在后）。
+  List<String> get recentLogs => List.unmodifiable(_logLines);
+
+  // ------------------------------------------------------------------ 初始化
+  Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          final modeName = decoded['mode'];
+          _mode = CustomSourceMode.values.firstWhere(
+            (item) => item.name == modeName,
+            orElse: () => CustomSourceMode.fallback,
+          );
+          final list = decoded['scripts'];
+          if (list is List) {
+            for (final item in list) {
+              if (item is Map) {
+                try {
+                  _scripts.add(
+                    CustomSourceScript.fromJson(Map<String, dynamic>.from(item)),
+                  );
+                } catch (error) {
+                  debugPrint('[custom-source] 跳过损坏的脚本记录: $error');
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      debugPrint('[custom-source] 读取配置失败: $error');
+    }
+    _scripts.sort((a, b) => a.order.compareTo(b.order));
+    notifyListeners();
+  }
+
+  Future<void> _persist() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final payload = jsonEncode({
+        'mode': _mode.name,
+        'scripts': _scripts.map((script) => script.toJson()).toList(),
+      });
+      await prefs.setString(_prefsKey, payload);
+    } catch (error) {
+      debugPrint('[custom-source] 保存配置失败: $error');
+    }
+  }
+
+  // -------------------------------------------------------------------- 导入
+  /// 从脚本源码导入。会先试跑一次拿到音源声明，失败也保留脚本并记录原因。
+  Future<CustomSourceScript> importFromText(
+    String code, {
+    String? originUrl,
+    String? fallbackName,
+  }) async {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) {
+      throw LxRuntimeException('脚本内容为空');
+    }
+
+    final meta = LxScriptMeta.parse(trimmed);
+    final name = (meta.name?.trim().isNotEmpty == true)
+        ? meta.name!.trim()
+        : (fallbackName?.trim().isNotEmpty == true ? fallbackName!.trim() : '未命名音源');
+
+    // 同名脚本直接覆盖，避免用户重复导入后列表里出现一堆同名项
+    final duplicated = _scripts.where((script) => script.name == name).toList();
+    for (final old in duplicated) {
+      _disposeRuntime(old.id);
+      _scripts.remove(old);
+    }
+
+    final script = CustomSourceScript(
+      id: '${DateTime.now().microsecondsSinceEpoch}',
+      name: name,
+      code: trimmed,
+      version: meta.version ?? '',
+      author: meta.author ?? '',
+      description: meta.description ?? '',
+      repository: meta.repository ?? '',
+      enabled: true,
+      order: _nextOrder(),
+      importedAt: DateTime.now(),
+      originUrl: originUrl,
+    );
+
+    final probed = await _probe(script);
+    _scripts.add(probed);
+    _scripts.sort((a, b) => a.order.compareTo(b.order));
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+    return probed;
+  }
+
+  /// 从网络地址导入，自动把 GitHub / Gitee / GitLab 的网页链接换成 raw 链接。
+  Future<CustomSourceScript> importFromUrl(String url) async {
+    final normalized = normalizeScriptUrl(url.trim());
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || !uri.hasScheme) {
+      throw LxRuntimeException('链接格式不正确');
+    }
+    final response = await _http
+        .get(uri, headers: const {'Accept': 'text/plain,*/*'})
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw LxRuntimeException('下载失败：HTTP ${response.statusCode}');
+    }
+    final text = utf8.decode(response.bodyBytes, allowMalformed: true);
+    if (!text.contains('lx') && !text.contains('EVENT_NAMES')) {
+      throw LxRuntimeException('这个链接返回的内容不像 lx-music 音源脚本');
+    }
+    final segments = uri.pathSegments;
+    final fallbackName = segments.isNotEmpty ? segments.last : null;
+    return importFromText(
+      text,
+      originUrl: normalized,
+      fallbackName: fallbackName,
+    );
+  }
+
+  /// 用脚本的实际运行结果补齐 `sources`，失败时把原因记进 `loadError`。
+  Future<CustomSourceScript> _probe(CustomSourceScript script) async {
+    final runtime = LxRuntime(debugTag: script.name);
+    try {
+      final result = await runtime.load(script.code);
+      _runtimes[script.id] = runtime;
+      _appendLog('【${script.name}】加载成功，支持 ${result.sources.keys.join('/')}');
+      return script.copyWith(sources: result.sources, clearLoadError: true);
+    } catch (error) {
+      runtime.dispose();
+      final message = error is LxRuntimeException ? error.message : '$error';
+      _appendLog('【${script.name}】加载失败：$message');
+      return script.copyWith(sources: const {}, loadError: message);
+    }
+  }
+
+  /// 重新加载某个脚本（界面上的「重试」）。
+  Future<void> reload(String id) async {
+    final index = _scripts.indexWhere((script) => script.id == id);
+    if (index < 0) return;
+    final current = _scripts[index];
+    _disposeRuntime(id);
+    final probed = await _probe(current.copyWith(enabled: current.enabled));
+    _scripts[index] = probed;
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  // -------------------------------------------------------------------- 维护
+  Future<void> setMode(CustomSourceMode mode) async {
+    if (_mode == mode) return;
+    _mode = mode;
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> setEnabled(String id, bool enabled) async {
+    final index = _scripts.indexWhere((script) => script.id == id);
+    if (index < 0) return;
+    _scripts[index] = _scripts[index].copyWith(enabled: enabled);
+    if (!enabled) _disposeRuntime(id);
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> remove(String id) async {
+    _disposeRuntime(id);
+    _scripts.removeWhere((script) => script.id == id);
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  /// 拖动排序后重新编号，序号即优先级。
+  Future<void> reorder(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= _scripts.length) return;
+    var target = newIndex;
+    if (target > oldIndex) target -= 1;
+    if (target < 0) target = 0;
+    if (target >= _scripts.length) target = _scripts.length - 1;
+    final moved = _scripts.removeAt(oldIndex);
+    _scripts.insert(target, moved);
+    for (var i = 0; i < _scripts.length; i++) {
+      _scripts[i] = _scripts[i].copyWith(order: i);
+    }
+    _cache.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  int _nextOrder() {
+    if (_scripts.isEmpty) return 0;
+    return _scripts
+            .map((script) => script.order)
+            .reduce((a, b) => a > b ? a : b) +
+        1;
+  }
+
+  void _disposeRuntime(String id) {
+    final runtime = _runtimes.remove(id);
+    runtime?.dispose();
+  }
+
+  // -------------------------------------------------------------------- 解析
+  /// 歌曲对应到 lx-music 的平台键。
+  static String? platformKeyOf(Song song) {
+    switch (song.source) {
+      case SongSource.kugou:
+        return 'kg';
+      case SongSource.netease:
+        return 'wy';
+      case SongSource.local:
+        return null;
+    }
+  }
+
+  /// 组装 lx-music 约定的 `musicInfo`。
+  ///
+  /// 脚本之间字段取用差异较大：酷狗系脚本读 `hash`，QQ/网易系读 `songmid`，
+  /// 少数脚本（溯音）还会用 `name` + `singer` 反查，所以这里尽量填满。
+  static Map<String, dynamic> buildMusicInfo(Song song, String platform) {
+    final duration = song.duration;
+    final interval = duration == null
+        ? ''
+        : '${duration.inMinutes.toString().padLeft(2, '0')}:'
+              '${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
+    final singer = song.artist;
+    return {
+      'songmid': platform == 'wy' ? song.id : (song.hash.isEmpty ? song.id : song.hash),
+      'hash': song.hash,
+      'id': song.id,
+      'name': song.title,
+      'singer': singer,
+      'albumName': song.albumName ?? '',
+      'album': song.albumName ?? '',
+      'albumId': song.albumId ?? '',
+      'interval': interval,
+      'img': song.coverUrl ?? '',
+      'source': platform,
+    };
+  }
+
+  /// 为歌曲解析播放地址。
+  ///
+  /// 按脚本顺序依次尝试，第一个成功即返回；全部失败时抛出最后一个错误，
+  /// 由调用方决定是否回退到官方接口。
+  Future<CustomSourceResolve> resolve(Song song, {required String appQuality}) async {
+    final platform = platformKeyOf(song);
+    if (platform == null) {
+      throw LxRuntimeException('本地歌曲不需要第三方音源');
+    }
+    final candidates = _scripts
+        .where((script) => script.enabled && script.sources.isNotEmpty)
+        .toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+    if (candidates.isEmpty) {
+      throw LxRuntimeException('没有启用中的第三方音源');
+    }
+
+    final cacheKey = '$platform:${song.hash}:${song.id}:$appQuality';
+    final cached = _cache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.createdAt) < _cacheTtl) {
+      return cached.resolve;
+    }
+
+    final musicInfo = buildMusicInfo(song, platform);
+    Object? lastError;
+    for (final script in candidates) {
+      final decl = script.sources[platform];
+      if (decl == null || !decl.canResolveUrl) continue;
+      final quality = pickLxQuality(decl.qualitys, appQuality);
+      try {
+        final runtime = await _runtimeFor(script);
+        final url = await runtime.fetchMusicUrl(
+          source: platform,
+          musicInfo: musicInfo,
+          quality: quality,
+        );
+        final resolve = CustomSourceResolve(
+          url: url,
+          scriptName: script.name,
+          sourceKey: platform,
+          quality: quality,
+        );
+        _remember(cacheKey, resolve);
+        _appendLog('【${script.name}】${song.title} → ${decl.displayLabel} $quality 成功');
+        return resolve;
+      } catch (error) {
+        lastError = error;
+        _appendLog(
+          '【${script.name}】${song.title} 解析失败：'
+          '${error is LxRuntimeException ? error.message : error}',
+        );
+      }
+    }
+
+    throw LxRuntimeException(
+      lastError?.toString() ?? '没有脚本支持 ${lxSourceLabels[platform] ?? platform} 音源',
+    );
+  }
+
+  Future<LxRuntime> _runtimeFor(CustomSourceScript script) async {
+    final existing = _runtimes[script.id];
+    if (existing != null && existing.isReady) return existing;
+    existing?.dispose();
+    final runtime = LxRuntime(debugTag: script.name);
+    await runtime.load(script.code);
+    _runtimes[script.id] = runtime;
+    return runtime;
+  }
+
+  void _remember(String key, CustomSourceResolve resolve) {
+    if (_cache.length >= _cacheLimit) {
+      final oldestKey = _cache.keys.first;
+      _cache.remove(oldestKey);
+    }
+    _cache[key] = _CacheEntry(resolve, DateTime.now());
+  }
+
+  void _appendLog(String line) {
+    final stamp = DateTime.now().toString().substring(11, 19);
+    _logLines.add('$stamp $line');
+    if (_logLines.length > 200) {
+      _logLines.removeRange(0, _logLines.length - 200);
+    }
+  }
+
+  void clearLogs() {
+    _logLines.clear();
+    notifyListeners();
+  }
+
+  /// 让播放器在切歌/改设置后能立刻丢掉旧地址。
+  void invalidateCache() {
+    _cache.clear();
+  }
+
+  /// 把 GitHub / Gitee / GitLab 的网页链接转成可直接下载的 raw 链接。
+  static String normalizeScriptUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    final host = uri.host.toLowerCase();
+    final segments = uri.pathSegments;
+
+    // https://github.com/user/repo/blob/main/x.js
+    if (host.endsWith('github.com') && segments.length >= 5 && segments[2] == 'blob') {
+      final rest = segments.sublist(3).join('/');
+      return 'https://raw.githubusercontent.com/${segments[0]}/${segments[1]}/$rest';
+    }
+    // https://gitee.com/user/repo/blob/main/x.js
+    if (host.endsWith('gitee.com') && segments.length >= 5 && segments[2] == 'blob') {
+      final rest = segments.sublist(3).join('/');
+      return 'https://gitee.com/${segments[0]}/${segments[1]}/raw/$rest';
+    }
+    // https://gitlab.com/user/repo/-/blob/main/x.js
+    // prefix 已经包含 GitLab 的 `-` 分隔段，直接拼 `raw` 才不会重复
+    final blobIndex = segments.indexOf('blob');
+    if (host.endsWith('gitlab.com') && blobIndex > 0) {
+      final prefix = segments.sublist(0, blobIndex).join('/');
+      final rest = segments.sublist(blobIndex + 1).join('/');
+      return 'https://gitlab.com/$prefix/raw/$rest';
+    }
+    return url;
+  }
+
+  @override
+  void dispose() {
+    for (final runtime in _runtimes.values) {
+      runtime.dispose();
+    }
+    _runtimes.clear();
+    _http.close();
+    super.dispose();
+  }
+}
