@@ -26,8 +26,9 @@ bool supportsComments(Song song) {
   return switch (song.source) {
     SongSource.kugou => song.hash.isNotEmpty,
     SongSource.netease => (song.albumAudioId ?? song.id).isNotEmpty,
-    // QQ 音乐暂未接入评论服务
+    // QQ / 汽水暂未接入评论服务
     SongSource.qq => false,
+    SongSource.qs => false,
     SongSource.local => false,
   };
 }

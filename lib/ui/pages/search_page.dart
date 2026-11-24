@@ -8,6 +8,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../../services/custom_source/qishui_link.dart';
 import '../../services/music_api.dart';
 import '../../services/search_history_service.dart';
 import '../widgets/artwork.dart';
@@ -237,6 +238,70 @@ class _SearchPageState extends State<SearchPage> {
         setState(() => _loading = false);
       }
     }
+  }
+
+  /// 粘贴汽水音乐分享链接直接播放。
+  ///
+  /// 汽水没有公开搜索接口，音源脚本也只认 trackId，所以只能把「用户分享出来的
+  /// 链接」解析成 trackId，再交给第三方音源取地址播放。
+  Future<void> _playFromQishuiLink() async {
+    final controller = TextEditingController();
+    final input = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('从汽水音乐链接播放'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '汽水音乐没有公开搜索接口，只能把分享链接粘进来播。\n'
+              '在汽水 App 里点分享 → 复制链接 → 粘贴到这里。',
+              style: TextStyle(fontSize: 12.5, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 4,
+              minLines: 1,
+              decoration: const InputDecoration(
+                hintText: 'https://qishui.douyin.com/s/xxxxxxx/',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('播放'),
+          ),
+        ],
+      ),
+    );
+    if (input == null || input.isEmpty || !mounted) return;
+
+    Toast.info('正在解析链接…');
+    final ref = await QishuiLinkParser.parse(input);
+    if (!mounted) return;
+    if (ref == null) {
+      Toast.error('没能识别出汽水音乐的 trackId，换个链接试试');
+      return;
+    }
+    final song = Song(
+      id: ref.id,
+      title: ref.title ?? '汽水音乐',
+      artist: '汽水音乐',
+      hash: '',
+      source: SongSource.qs,
+    );
+    await widget.player.playSong(song);
   }
 
   /// 请求返回时校验是否仍是最新一次搜索：代次、关键词、类型、平台都要一致。
@@ -590,6 +655,11 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           actions: [
+            IconButton(
+              tooltip: '从汽水音乐链接播放',
+              onPressed: _playFromQishuiLink,
+              icon: const Icon(Icons.link_rounded, size: 20),
+            ),
             // 有内容时右上角是「搜索」，点一下主动发起搜索；
             // 输入框清空后变回「取消」，点了关闭搜索页。
             TextButton(

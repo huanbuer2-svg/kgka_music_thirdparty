@@ -1180,6 +1180,9 @@ class PlayerController extends ChangeNotifier {
       // 官方接口是酷狗的，拿不到 QQ 的地址；只能交给第三方音源脚本
       throw Exception('QQ 音乐歌曲需要第三方音源支持（请先导入支持 QQ 的音源）');
     }
+    if (song.source == SongSource.qs) {
+      throw Exception('汽水音乐需要第三方音源支持（请先导入支持汽水的音源）');
+    }
     if (song.isCloudDrive) {
       return _api.cloudSongUrl(song);
     }

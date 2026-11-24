@@ -198,6 +198,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
     SongSource.kugou => '酷狗音乐',
     SongSource.netease => '网易云音乐',
     SongSource.qq => 'QQ 音乐',
+    SongSource.qs => '汽水音乐',
     SongSource.local => '本地文件',
   };
 }

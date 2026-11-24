@@ -368,6 +368,8 @@ class CustomSourceManager extends ChangeNotifier {
         return 'wy';
       case SongSource.qq:
         return 'tx';
+      case SongSource.qs:
+        return 'qs';
       case SongSource.local:
         return null;
     }
