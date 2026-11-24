@@ -460,6 +460,21 @@ class PlayerController extends ChangeNotifier {
   bool _onCellular = false;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
+  /// 用户手动设置的播放音量（0~1）。
+  ///
+  /// 只影响 App 内部播放增益，不动系统音量；切歌、暂停恢复都要按它复位，
+  /// 否则会被上一次播放流程里的 setVolume(1.0) 抹掉。
+  double _userVolume = 1.0;
+  double get userVolume => _userVolume;
+
+  Future<void> setUserVolume(double value) async {
+    final next = value.clamp(0.0, 1.0).toDouble();
+    if ((next - _userVolume).abs() < 0.001) return;
+    _userVolume = next;
+    await audioPlayer.setVolume(next);
+    notifyListeners();
+  }
+
   /// 实际用于播放的音质。
   ///
   /// 开启「按网络类型选择音质」后，蜂窝网络下自动降一档，避免用流量拉无损；
@@ -870,7 +885,7 @@ class PlayerController extends ChangeNotifier {
         notifyListeners();
         unawaited(loadLyrics(song));
         if (wasPlaying) {
-          unawaited(audioPlayer.setVolume(1.0));
+          unawaited(audioPlayer.setVolume(_userVolume));
         }
         await _startPlayback(expectedIntent: intentSerial);
         if (requestSerial != _playRequestSerial) return;
@@ -897,7 +912,7 @@ class PlayerController extends ChangeNotifier {
       errorMessage = error.toString();
       unawaited(_audioHandler.pause());
       if (wasPlaying) {
-        unawaited(audioPlayer.setVolume(1.0));
+        unawaited(audioPlayer.setVolume(_userVolume));
       }
       isPreparing = false;
       notifyListeners();
@@ -1160,6 +1175,10 @@ class PlayerController extends ChangeNotifier {
   Future<PlayUrl> _resolveOfficialPlayUrl(Song song) async {
     if (song.source == SongSource.local) {
       return PlayUrl(url: song.id, hash: song.hash);
+    }
+    if (song.source == SongSource.qq) {
+      // 官方接口是酷狗的，拿不到 QQ 的地址；只能交给第三方音源脚本
+      throw Exception('QQ 音乐歌曲需要第三方音源支持（请先导入支持 QQ 的音源）');
     }
     if (song.isCloudDrive) {
       return _api.cloudSongUrl(song);

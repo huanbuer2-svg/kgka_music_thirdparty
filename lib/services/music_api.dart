@@ -1170,6 +1170,89 @@ class MusicApi {
         .toList();
   }
 
+  /// 搜索 QQ 音乐。
+  ///
+  /// 走 QQ 的 `musicu.fcg` 公开接口（只需要 Referer），返回的 `mid` 就是
+  /// 脚本侧 `tx` 平台的 `songmid`，播放时交给第三方音源解析。
+  Future<List<Song>> searchQqSongs(
+    String keywords, {
+    int page = 1,
+    int pageSize = 30,
+  }) async {
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://u.y.qq.com/cgi-bin/musicu.fcg'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Referer': 'https://y.qq.com/',
+              'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+            },
+            body: jsonEncode({
+              'comm': {'ct': 19, 'cv': 1859, 'uin': '0'},
+              'req': {
+                'method': 'DoSearchForQQMusicDesktop',
+                'module': 'music.search.SearchCgiService',
+                'param': {
+                  'num_per_page': pageSize,
+                  'page_num': page,
+                  'query': keywords,
+                  'search_type': 0,
+                },
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        throw ApiException('QQ 音乐搜索失败：HTTP ${response.statusCode}');
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final body = asMap(asMap(asMap(decoded)['req'])['data'])['body'];
+      final list = asList(asMap(body)['song'] is Map
+          ? asMap(asMap(body)['song'])['list']
+          : null);
+      final songs = <Song>[];
+      for (final item in list) {
+        if (item is! Map) continue;
+        final json = asMap(item);
+        final mid = asString(json['mid']) ?? asString(json['songmid']) ?? '';
+        if (mid.isEmpty) continue;
+        final album = asMap(json['album']);
+        final albumMid = asString(album['mid']) ?? '';
+        final singers = asList(json['singer'])
+            .whereType<Map>()
+            .map((entry) => asString(asMap(entry)['name']) ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+        final interval = (json['interval'] as num?)?.toInt() ?? 0;
+        songs.add(
+          Song(
+            id: mid,
+            title:
+                asString(json['title']) ??
+                asString(json['name']) ??
+                '未知歌曲',
+            artist: singers.isEmpty ? '未知艺人' : singers.join(' / '),
+            hash: '',
+            albumName: asString(album['name']),
+            coverUrl: albumMid.isEmpty
+                ? null
+                : 'https://y.gtimg.cn/music/photo_new/'
+                      'T002R300x300M000$albumMid.jpg',
+            duration: interval > 0 ? Duration(seconds: interval) : null,
+            source: SongSource.qq,
+          ),
+        );
+      }
+      return songs;
+    } finally {
+      client.close();
+    }
+  }
+
   /// 搜索专辑（酷狗）。
   ///
   /// 与 [searchSongs] 共用 `/search` 接口，`type=album` 返回专辑列表。

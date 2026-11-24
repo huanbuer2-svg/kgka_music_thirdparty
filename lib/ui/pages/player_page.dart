@@ -18,11 +18,13 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../../services/custom_source/custom_source_manager.dart';
 import '../../services/cover_service.dart';
 import '../../services/lyric_converter.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/blurred_lyric_view.dart';
+import '../widgets/download_quality_sheet.dart';
 import '../widgets/retryable_network_image.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
@@ -293,6 +295,7 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                     'poster-player-page',
                                   ),
                                   player: widget.player,
+                                  auth: widget.auth,
                                   song: widget.song,
                                   onQueue: widget.onQueue,
                                   isPageVisible: _page == 0 || _pageScrolling,
@@ -1515,6 +1518,7 @@ class _PosterPlayerPage extends StatefulWidget {
   const _PosterPlayerPage({
     super.key,
     required this.player,
+    required this.auth,
     required this.song,
     required this.onQueue,
     this.isPageVisible = true,
@@ -1522,6 +1526,7 @@ class _PosterPlayerPage extends StatefulWidget {
   });
 
   final PlayerController player;
+  final AuthController auth;
   final Song song;
   final VoidCallback onQueue;
   final bool isPageVisible;
@@ -1536,40 +1541,149 @@ class _PosterPlayerPage extends StatefulWidget {
 class _PosterPlayerPageState extends State<_PosterPlayerPage>
     with AutomaticKeepAliveClientMixin {
   void _openMoreMenu(BuildContext context) {
+    final player = widget.player;
     showSongActionSheet(
       context: context,
       song: widget.song,
       actions: [
         SongSheetAction(
-          icon: Icons.speed_rounded,
-          title: '倍速',
-          subtitle: widget.player.playbackSpeedLabel,
-          isGrid: true,
-          onTap: () => showPlaybackSpeedSheet(context: context, player: widget.player),
+          icon: Icons.download_rounded,
+          title: '下载歌曲',
+          subtitle: '可选无损 / FLAC 24 位 / Hi-Res / Atmos / Master',
+          onTap: () => _downloadCurrentSong(context),
+        ),
+        SongSheetAction(
+          icon: Icons.playlist_add_rounded,
+          title: '添加到歌单',
+          onTap: () => showAddToPlaylistSheet(
+            context: context,
+            auth: widget.auth,
+            song: widget.song,
+          ),
         ),
         SongSheetAction(
           icon: Icons.high_quality_rounded,
-          title: '音质',
-          subtitle: widget.player.audioQuality.badge,
-          isGrid: true,
-          onTap: () => _showAudioQualityPicker(context, widget.player),
+          title: '播放音质',
+          subtitle: player.audioQuality.label,
+          onTap: () => _showAudioQualityPicker(context, player),
+        ),
+        SongSheetAction(
+          icon: Icons.volume_up_rounded,
+          title: '软件音量',
+          subtitle: '${(player.userVolume * 100).round()}%',
+          onTap: () => _showVolumeSheet(context),
+        ),
+        SongSheetAction(
+          icon: Icons.speed_rounded,
+          title: '倍速',
+          subtitle: player.playbackSpeedLabel,
+          onTap: () => showPlaybackSpeedSheet(context: context, player: player),
         ),
         SongSheetAction(
           icon: Icons.graphic_eq_rounded,
           title: '音效',
-          isGrid: true,
-          onTap: () => showAudioEffectsSheet(context: context, player: widget.player),
+          onTap: () => showAudioEffectsSheet(context: context, player: player),
         ),
         SongSheetAction(
           icon: Icons.bedtime_outlined,
           title: '定时关闭',
-          subtitle: widget.player.sleepTimerRemaining == null
+          subtitle: player.sleepTimerRemaining == null
               ? null
-              : formatDuration(widget.player.sleepTimerRemaining!),
-          isGrid: true,
-          onTap: () => showSleepTimerSheet(context: context, player: widget.player),
+              : formatDuration(player.sleepTimerRemaining!),
+          onTap: () => showSleepTimerSheet(context: context, player: player),
         ),
       ],
+    );
+  }
+
+  /// 下载当前歌曲：先选音质（含第三方音源专有档位），再入队。
+  Future<void> _downloadCurrentSong(BuildContext context) async {
+    final downloads = widget.player.downloadController;
+    if (downloads == null) {
+      Toast.error('下载功能暂时不可用');
+      return;
+    }
+    final manager = CustomSourceManager.instance;
+    final choice = await showDownloadQualitySheet(
+      context: context,
+      songTitle: widget.song.title,
+      thirdPartyAvailable:
+          manager.hasEnabledScript && !widget.song.isCloudDrive,
+    );
+    if (choice == null || !context.mounted) return;
+    await downloads.download(
+      widget.song,
+      choice.official,
+      thirdPartyQuality: choice.thirdParty,
+    );
+    if (context.mounted) Toast.info('已加入下载队列：${choice.label}');
+  }
+
+  /// 软件音量：只调 App 内部增益，不动系统音量。
+  Future<void> _showVolumeSheet(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: AnimatedBuilder(
+              animation: widget.player,
+              builder: (context, _) {
+                final volume = widget.player.userVolume;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '软件音量',
+                      style: Theme.of(sheetContext).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '只影响 App 内播放增益，不改变系统音量',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Icon(
+                          volume == 0
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_down_rounded,
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: volume,
+                            onChanged: (value) =>
+                                unawaited(widget.player.setUserVolume(value)),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 46,
+                          child: Text(
+                            '${(volume * 100).round()}%',
+                            textAlign: TextAlign.end,
+                            style: const TextStyle(fontFeatures: [
+                              FontFeature.tabularFigures(),
+                            ]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 

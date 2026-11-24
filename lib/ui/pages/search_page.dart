@@ -41,7 +41,7 @@ class SearchPage extends StatefulWidget {
 }
 
 /// 搜索平台。
-enum _SearchPlatform { kugou, netease }
+enum _SearchPlatform { kugou, netease, qq }
 
 /// 搜索类型。
 enum _SearchType { song, album }
@@ -207,9 +207,13 @@ class _SearchPageState extends State<SearchPage> {
           _results = const [];
         });
       } else {
-        final songs = platform == _SearchPlatform.netease
-            ? await widget.api.searchNetEaseSongs(keywords)
-            : await widget.api.searchSongs(keywords);
+        final songs = switch (platform) {
+          _SearchPlatform.netease => await widget.api.searchNetEaseSongs(
+            keywords,
+          ),
+          _SearchPlatform.qq => await widget.api.searchQqSongs(keywords),
+          _SearchPlatform.kugou => await widget.api.searchSongs(keywords),
+        };
         if (!_isCurrentSearch(serial, keywords, type, platform)) return;
         setState(() {
           _results = songs;
@@ -1038,8 +1042,11 @@ class _PlatformSelector extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
-      child: Row(
-        children: [
+      // 平台变多后在窄屏会挤，改成横向滚动
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
           for (final p in _SearchPlatform.values) ...[
             LiquidGlassCapsule(
               isActive: platform == p,
@@ -1049,7 +1056,11 @@ class _PlatformSelector extends StatelessWidget {
                 vertical: 7,
               ),
               child: Text(
-                p == _SearchPlatform.kugou ? '酷狗' : '网易云',
+                switch (p) {
+                  _SearchPlatform.kugou => '酷狗',
+                  _SearchPlatform.netease => '网易云',
+                  _SearchPlatform.qq => 'QQ音乐',
+                },
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: platform == p
                       ? (Theme.of(context).brightness == Brightness.dark
@@ -1064,7 +1075,8 @@ class _PlatformSelector extends StatelessWidget {
             ),
             const SizedBox(width: 10),
           ],
-        ],
+          ],
+        ),
       ),
     );
   }

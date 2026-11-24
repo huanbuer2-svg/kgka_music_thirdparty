@@ -460,6 +460,8 @@ enum SongSource {
   kugou,
   /// 网易云音乐
   netease,
+  /// QQ 音乐（播放依赖第三方音源脚本）
+  qq,
   /// 本地音乐
   local,
 }

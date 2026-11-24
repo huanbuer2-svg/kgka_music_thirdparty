@@ -366,6 +366,8 @@ class CustomSourceManager extends ChangeNotifier {
         return 'kg';
       case SongSource.netease:
         return 'wy';
+      case SongSource.qq:
+        return 'tx';
       case SongSource.local:
         return null;
     }
@@ -401,7 +403,11 @@ class CustomSourceManager extends ChangeNotifier {
   ///
   /// 按脚本顺序依次尝试，第一个成功即返回；全部失败时抛出最后一个错误，
   /// 由调用方决定是否回退到官方接口。
-  Future<CustomSourceResolve> resolve(Song song, {required String appQuality}) async {
+  Future<CustomSourceResolve> resolve(
+    Song song, {
+    required String appQuality,
+    ThirdPartyQuality? preferredQuality,
+  }) async {
     final platform = platformKeyOf(song);
     if (platform == null) {
       throw LxRuntimeException('本地歌曲不需要第三方音源');
@@ -429,7 +435,7 @@ class CustomSourceManager extends ChangeNotifier {
       final quality = pickLxQuality(
         decl.qualitys,
         appQuality,
-        preferred: _quality.lxValue,
+        preferred: (preferredQuality ?? _quality).lxValue,
       );
       try {
         final runtime = await _runtimeFor(script);

@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/music_models.dart';
 import '../services/download_service.dart';
 import '../services/download_metadata_writer.dart';
+import '../services/custom_source/custom_source_manager.dart';
+import '../services/custom_source/lx_script.dart';
 import '../services/music_api.dart';
 
 /// 下载状态枚举。
@@ -373,8 +375,47 @@ class DownloadController extends ChangeNotifier {
 
   // ===== 下载操作 =====
 
+  /// 解析下载地址。
+  ///
+  /// 指定 [thirdPartyQuality] 时优先走第三方音源脚本（能拿到 24 位 / Atmos /
+  /// Master 这类官方接口没有的档位），失败再回退官方接口，不让下载整个失败。
+  Future<PlayUrl> _resolveDownloadUrl(
+    Song song,
+    AudioQuality quality, [
+    ThirdPartyQuality? thirdPartyQuality,
+  ]) async {
+    if (thirdPartyQuality != null) {
+      final manager = CustomSourceManager.instance;
+      if (manager.hasEnabledScript &&
+          CustomSourceManager.platformKeyOf(song) != null) {
+        try {
+          final resolved = await manager.resolve(
+            song,
+            appQuality: quality.apiValue,
+            preferredQuality: thirdPartyQuality,
+          );
+          debugPrint(
+            '[KA Music][download] ${resolved.scriptName} 提供 '
+            '${resolved.sourceLabel} ${resolved.quality}',
+          );
+          return PlayUrl(url: resolved.url, hash: song.hash);
+        } catch (error) {
+          debugPrint('[KA Music][download] 第三方音源失败，回退官方：$error');
+        }
+      }
+    }
+    return _api.songUrl(song, quality: quality);
+  }
+
   /// 用户主动下载歌曲。
-  Future<void> download(Song song, AudioQuality quality) async {
+  ///
+  /// [thirdPartyQuality] 不为空时表示用户选了第三方音源专有的档位
+  /// （FLAC 24 位 / Hi-Res / Atmos / Atmos+ / Master）。
+  Future<void> download(
+    Song song,
+    AudioQuality quality, {
+    ThirdPartyQuality? thirdPartyQuality,
+  }) async {
     final key = _downloadKey(song);
     final existing = _downloads[key];
     if (existing?.status == DownloadStatus.downloading) return;
@@ -391,7 +432,11 @@ class DownloadController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final playUrl = await _api.songUrl(song, quality: quality);
+      final playUrl = await _resolveDownloadUrl(
+        song,
+        quality,
+        thirdPartyQuality,
+      );
       if (_downloadAttempts[key] != attempt) return;
       if (playUrl.url.isEmpty) {
         throw Exception('这首歌暂时没有可播放地址');
