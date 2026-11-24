@@ -304,7 +304,7 @@ class _SearchPageState extends State<SearchPage> {
     final song = Song(
       id: ref.id,
       title: ref.title ?? '汽水音乐',
-      artist: '汽水音乐',
+      artist: ref.artist ?? '汽水音乐',
       hash: '',
       source: SongSource.qs,
     );
