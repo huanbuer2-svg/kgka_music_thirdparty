@@ -43,7 +43,7 @@ Future<void> main() async {
     builder: MusicAudioHandler.new,
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'kgka_music_hl.playback',
-      androidNotificationChannelName: 'KA Music 播放控制',
+      androidNotificationChannelName: '贰悦 播放控制',
       androidStopForegroundOnPause: false,
     ),
   );

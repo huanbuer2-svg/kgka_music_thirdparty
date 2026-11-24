@@ -1,13 +1,46 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/music_models.dart';
 import 'lx_runtime.dart';
 import 'lx_script.dart';
+
+/// 随安装包内置的音源脚本。
+///
+/// 首次启动自动导入并启用；用户手动删除后会记住，不会下次启动又塞回来。
+class BuiltinCustomSource {
+  const BuiltinCustomSource({
+    required this.id,
+    required this.asset,
+    required this.displayName,
+  });
+
+  final String id;
+
+  /// Flutter asset 路径。
+  final String asset;
+
+  /// 脚本头部没写名字时的兜底名称。
+  final String displayName;
+
+  /// 记录在脚本条目的 originUrl 上，用来判断「已经装过」。
+  String get origin => 'builtin://$id';
+}
+
+/// 内置音源清单。只收录经过宿主自检（`tool/lx_host_check.cjs`）验证能跑通的脚本。
+const List<BuiltinCustomSource> kBuiltinCustomSources = [
+  BuiltinCustomSource(
+    id: 'xinglan',
+    asset: 'lib/assets/custom_sources/xinglan.js',
+    displayName: '星澜音乐源',
+  ),
+];
 
 /// 自定义音源在播放链路里的介入方式。
 enum CustomSourceMode {
@@ -92,6 +125,9 @@ class CustomSourceManager extends ChangeNotifier {
   /// 用户在「第三方音源音质」里单独选的档位。
   ThirdPartyQuality _quality = ThirdPartyQuality.master;
 
+  /// 用户删掉的内置音源 id，用来避免下次启动又自动装回来。
+  final Set<String> _removedBuiltins = {};
+
   /// 移动网络下自动降一档音质，避免用流量拉无损。
   bool _networkAwareQuality = false;
 
@@ -137,6 +173,10 @@ class CustomSourceManager extends ChangeNotifier {
               ThirdPartyQuality.master;
           _networkAwareQuality = decoded['networkAwareQuality'] == true;
           _switchPlatformOnFailure = decoded['switchPlatformOnFailure'] == true;
+          final removed = decoded['removedBuiltins'];
+          if (removed is List) {
+            _removedBuiltins.addAll(removed.whereType<String>());
+          }
           final list = decoded['scripts'];
           if (list is List) {
             for (final item in list) {
@@ -158,6 +198,47 @@ class CustomSourceManager extends ChangeNotifier {
     }
     _scripts.sort((a, b) => a.order.compareTo(b.order));
     notifyListeners();
+    // 后台装内置音源，不阻塞启动
+    unawaited(_installBuiltinSources());
+  }
+
+  /// 把随包内置的音源装进列表（已装过、或被用户删过就跳过）。
+  Future<void> _installBuiltinSources() async {
+    // 单测环境没有真实资产与 JS 引擎，跳过以免拖慢用例
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+    var changed = false;
+    for (final builtin in kBuiltinCustomSources) {
+      if (_removedBuiltins.contains(builtin.id)) continue;
+      if (_scripts.any((script) => script.originUrl == builtin.origin)) continue;
+      try {
+        final code = await rootBundle.loadString(builtin.asset);
+        final meta = LxScriptMeta.parse(code);
+        final draft = CustomSourceScript(
+          id: 'builtin-${builtin.id}',
+          name: meta.name ?? builtin.displayName,
+          code: code,
+          version: meta.version ?? '',
+          author: meta.author ?? '',
+          description: meta.description ?? '',
+          repository: meta.repository ?? '',
+          enabled: true,
+          order: _scripts.length,
+          importedAt: DateTime.now(),
+          originUrl: builtin.origin,
+        );
+        final probed = await _probe(draft);
+        _scripts.add(probed);
+        changed = true;
+        debugPrint('[KA Music][custom-source] 已内置音源 ${probed.name}');
+      } catch (error) {
+        debugPrint('[custom-source] 内置音源 ${builtin.id} 安装失败：$error');
+      }
+    }
+    if (changed) {
+      _scripts.sort((a, b) => a.order.compareTo(b.order));
+      await _persist();
+      notifyListeners();
+    }
   }
 
   Future<void> _persist() async {
@@ -168,6 +249,7 @@ class CustomSourceManager extends ChangeNotifier {
         'quality': _quality.lxValue,
         'networkAwareQuality': _networkAwareQuality,
         'switchPlatformOnFailure': _switchPlatformOnFailure,
+        'removedBuiltins': _removedBuiltins.toList(),
         'scripts': _scripts.map((script) => script.toJson()).toList(),
       });
       await prefs.setString(_prefsKey, payload);
@@ -322,6 +404,14 @@ class CustomSourceManager extends ChangeNotifier {
 
   Future<void> remove(String id) async {
     _disposeRuntime(id);
+    for (final script in _scripts) {
+      if (script.id == id && script.originUrl != null) {
+        final origin = script.originUrl!;
+        if (origin.startsWith('builtin://')) {
+          _removedBuiltins.add(origin.substring('builtin://'.length));
+        }
+      }
+    }
     _scripts.removeWhere((script) => script.id == id);
     _cache.clear();
     await _persist();

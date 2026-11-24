@@ -129,6 +129,14 @@ iOS 的 ATS 与 macOS 沙盒网络权限已在本次改动里补上。
 引擎端到端用例在 `flutter test` 下会先尝试加载 `quickjs_c_bridge.dll`，
 加载不到就自动 skip（CI 里不会红）。
 
+## 内置音源
+
+安装包内置 **星澜音乐源**（`lib/assets/custom_sources/xinglan.js`），首次启动自动导入并启用，
+支持 QQ / 网易云 / 酷我 / 酷狗 / 咪咕 五个平台。删掉后不会再次自动装回
+（记在 `removedBuiltins` 里）。
+
+内置前会用 `tool/lx_host_check.cjs` 过一遍宿主自检，跑不通的脚本不会进包。
+
 ## 多平台与下载
 
 **搜索平台**：搜索页顶部可切 酷狗 / 网易云 / QQ音乐。

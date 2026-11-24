@@ -135,7 +135,7 @@ class UserProfile {
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
-      nickname: asString(json['nickname']) ?? 'KA Music 用户',
+      nickname: asString(json['nickname']) ?? '贰悦用户',
       avatarUrl: normalizeImageUrl(asString(json['pic'])),
     );
   }
@@ -145,7 +145,7 @@ class UserProfile {
 
   factory UserProfile.fromCache(Map<String, dynamic> json) {
     return UserProfile(
-      nickname: asString(json['nickname']) ?? 'KA Music 用户',
+      nickname: asString(json['nickname']) ?? '贰悦用户',
       avatarUrl: asString(json['avatarUrl']),
     );
   }

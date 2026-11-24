@@ -77,7 +77,7 @@ class DownloadService {
 
   /// 持久下载目录。
   ///
-  /// Android 优先使用系统公共下载目录（/storage/emulated/0/Download/KA Music），
+  /// Android 优先使用系统公共下载目录（/storage/emulated/0/Download/贰悦），
   /// 需要存储权限；其他平台或获取失败时回退到应用文档目录。
   Future<Directory> downloadDir() async {
     try {
