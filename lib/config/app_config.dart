@@ -1,11 +1,31 @@
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AppConfig {
   const AppConfig._();
 
-  static const appName = '贰悅';
-  static const appVersion = '3.3.0';
-  static const appVersionCode = '330';
+  static const appName = '贰悦';
+  /// 实际版本号在启动时从安装包读取（见 [loadPackageInfo]）。
+  ///
+  /// 以前这里是写死的 `'3.3.0'`，跟 pubspec 完全脱钩，导致关于页永远显示
+  /// 旧版本号、误导排查。改成运行时读取后，任何平台的包都显示真实版本。
+  static String appVersion = '3.7.0';
+  static String appVersionCode = '1';
+
+  static bool _packageInfoLoaded = false;
+
+  /// 读取安装包信息；失败时保留默认值，不影响启动。
+  static Future<void> loadPackageInfo() async {
+    if (_packageInfoLoaded) return;
+    _packageInfoLoaded = true;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (info.version.isNotEmpty) appVersion = info.version;
+      if (info.buildNumber.isNotEmpty) appVersionCode = info.buildNumber;
+    } catch (_) {
+      // 桌面调试或插件不可用时忽略
+    }
+  }
 
   static const _defaultApiBaseUrl = 'https://music.api.hoilai.cn';
   static const _customBaseUrlKey = 'settings.custom_api_base_url';
@@ -23,7 +43,7 @@ class AppConfig {
   // ===== 缓存与下载配置 =====
   /// 数据缓存目录名 / 下载目录名 / 播放缓存目录名
   static const cacheDirName = 'ka_music_cache';
-  static const downloadDirName = '贰悅';
+  static const downloadDirName = '贰悦';
   static const playCacheDirName = 'ka_music_play_cache';
 
   /// 数据缓存 TTL（分级）

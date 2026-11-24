@@ -15,6 +15,7 @@ import 'controllers/theme_controller.dart';
 import 'core/api_client.dart';
 import 'services/cache_service.dart';
 import 'services/custom_source/custom_source_manager.dart';
+import 'services/platform_preference.dart';
 import 'services/deep_link_service.dart';
 import 'services/device_info_service.dart';
 import 'services/log_service.dart';
@@ -33,6 +34,8 @@ Future<void> main() async {
   await AppConfig.loadCustomBaseUrl();
   // 第三方音源脚本列表要在首屏与播放器之前就绪，否则第一首歌会按「未启用」处理
   await CustomSourceManager.instance.init();
+  await AppConfig.loadPackageInfo();
+  await PlatformPreference.instance.init();
 
   final client = ApiClient();
   final api = MusicApi(client);

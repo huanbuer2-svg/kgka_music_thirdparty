@@ -14,8 +14,9 @@ import '../adaptive_layout.dart';
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key, required this.api});
 
+  /// 本仓库的公开地址（源码仓库是私有的，这里指向可公开访问的发布仓库）
   static final Uri _repositoryUri = Uri.parse(
-    'https://github.com/umr-xiaomai/kgka_Music_hl',
+    'https://github.com/huanbuer2-svg/ka-music-releases',
   );
 
   final MusicApi api;
@@ -139,11 +140,8 @@ class _AboutPageState extends State<AboutPage> {
                 child: _InfoSection(
                   children: [
                     const _InfoRow(label: '应用名称', value: AppConfig.appName),
-                    const _InfoRow(label: '当前版本', value: AppConfig.appVersion),
-                    const _InfoRow(
-                      label: '作者',
-                      value: '小埋-XiaoMai，其他Github开发者',
-                    ),
+                    _InfoRow(label: '当前版本', value: AppConfig.appVersion),
+                    const _InfoRow(label: '作者', value: '贰悦'),
                     _InfoRow(
                       label: '服务地址',
                       value: AppConfig.hasCustomBaseUrl
@@ -152,7 +150,7 @@ class _AboutPageState extends State<AboutPage> {
                     ),
                     _InfoLinkRow(
                       label: 'GitHub',
-                      value: 'umr-xiaomai/kgka_Music_hl',
+                      value: 'huanbuer2-svg/ka-music-releases',
                       onTap: () => _openRepository(context),
                     ),
                   ],

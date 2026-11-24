@@ -10,6 +10,7 @@ import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/custom_source/qishui_link.dart';
 import '../../services/music_api.dart';
+import '../../services/platform_preference.dart';
 import '../../services/search_history_service.dart';
 import '../widgets/artwork.dart';
 import '../widgets/song_artwork.dart';
@@ -84,6 +85,12 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    // 首页「平台切换」选的默认平台带过来
+    final preferred = PlatformPreference.instance.platform;
+    _platform = _SearchPlatform.values.firstWhere(
+      (item) => item.name == preferred,
+      orElse: () => _SearchPlatform.kugou,
+    );
     _focusNode.requestFocus();
     _focusNode.addListener(_onFocusChanged);
     _loadHotKeywords();

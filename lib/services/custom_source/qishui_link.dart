@@ -50,7 +50,8 @@ class QishuiLinkParser {
   );
 
   /// 解析用户粘贴的内容。解析不出来返回 null。
-  static Future<QishuiTrackRef?> parse(String raw) async {
+  /// [fetchTitle] 为 false 时跳过抓歌名的网络请求（单测用）。
+  static Future<QishuiTrackRef?> parse(String raw, {bool fetchTitle = true}) async {
     final text = raw.trim();
     if (text.isEmpty) return null;
 
@@ -64,9 +65,13 @@ class QishuiLinkParser {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) return null;
 
-    // 链接本身就带参数时不必发请求
+    // 链接本身就带参数：id 有了，但仍去落地页抓一次歌名，
+    // 否则播放列表里只能显示「汽水音乐」这个占位名
     final direct = _extractFromUri(uri);
-    if (direct != null) return QishuiTrackRef(id: direct);
+    if (direct != null) {
+      final title = fetchTitle ? await _fetchTitle(uri) : null;
+      return QishuiTrackRef(id: direct, title: title);
+    }
 
     return _resolveShortLink(uri);
   }
@@ -107,6 +112,34 @@ class QishuiLinkParser {
     }
   }
 
+  /// 只为了拿歌名的一次请求；失败静默，不影响播放。
+  static Future<String?> _fetchTitle(Uri uri) async {
+    final client = http.Client();
+    try {
+      final response = await client
+          .get(
+            uri,
+            headers: const {
+              'User-Agent':
+                  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                      'Mobile/15E148 Safari/604.1',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
+      final body = utf8.decode(response.bodyBytes, allowMalformed: true);
+      final finalUri = response.request?.url ?? uri;
+      return _extractTitle(body) ??
+          _extractTitleFromUri(finalUri) ??
+          _extractTitleFromUri(uri);
+    } catch (error) {
+      debugPrint('[KA Music][qishui] 抓取歌名失败: $error');
+      return null;
+    } finally {
+      client.close();
+    }
+  }
+
   static String? _extractFromUri(Uri uri) {
     for (final key in _queryKeys) {
       final value = uri.queryParameters[key];
@@ -132,11 +165,49 @@ class QishuiLinkParser {
     return null;
   }
 
+  /// 依次尝试 JSON 字段 → og:title → `<title>`，再丢掉「- 汽水音乐」这类后缀。
   static String? _extractTitle(String html) {
-    final match = RegExp(
-      r'"(?:title|name|track_name|songName)"\s*:\s*"([^"]{1,80})"',
+    final jsonMatch = RegExp(
+      r'"(?:track_?name|song_?name|title|name)"\s*:\s*"([^"]{1,80})"',
       caseSensitive: false,
     ).firstMatch(html);
-    return match?.group(1);
+    if (jsonMatch != null) return _cleanTitle(jsonMatch.group(1));
+
+    final ogMatch = RegExp(
+      r'<meta[^>]+(?:property|name)=["\x27]og:title["\x27][^>]+content=["\x27]([^"\x27]{1,100})',
+      caseSensitive: false,
+    ).firstMatch(html);
+    if (ogMatch != null) return _cleanTitle(ogMatch.group(1));
+
+    final titleMatch = RegExp(
+      r'<title[^>]*>([^<]{1,100})</title>',
+      caseSensitive: false,
+    ).firstMatch(html);
+    if (titleMatch != null) return _cleanTitle(titleMatch.group(1));
+    return null;
+  }
+
+  /// 链接的 query 里偶尔直接带歌名。
+  static String? _extractTitleFromUri(Uri uri) {
+    for (final key in const ['title', 'name', 'song_name', 'songName']) {
+      final value = uri.queryParameters[key];
+      if (value != null && value.trim().isNotEmpty) {
+        return _cleanTitle(Uri.decodeComponent(value));
+      }
+    }
+    return null;
+  }
+
+  static String? _cleanTitle(String? raw) {
+    var text = (raw ?? '').trim();
+    if (text.isEmpty) return null;
+    text = text
+        .replaceAll('&quot;', '"')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&#39;', "'");
+    // 去掉「- 汽水音乐」「_汽水音乐」这类站点后缀
+    text = text.replaceAll(RegExp(r'\s*[-_|—·]\s*汽水音乐.*$'), '').trim();
+    if (text.isEmpty || text == '汽水音乐') return null;
+    return text.length > 60 ? text.substring(0, 60) : text;
   }
 }

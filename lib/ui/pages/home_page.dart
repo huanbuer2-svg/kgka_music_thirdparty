@@ -17,6 +17,7 @@ import '../../models/music_models.dart';
 import '../../services/app_update_service.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
+import '../../services/platform_preference.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
 import '../widgets/now_playing_badge.dart';
@@ -585,7 +586,83 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openSettings() {
+  /// 首页右上角按钮：切换默认搜索平台，底部保留「设置」入口。
+  Future<void> _openSettings() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        final preference = PlatformPreference.instance;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: Text(
+                  '搜索平台',
+                  style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  '切换后搜索页默认使用该平台',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
+              ),
+              AnimatedBuilder(
+                animation: preference,
+                builder: (context, _) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final entry in PlatformPreference.labels.entries)
+                      ListTile(
+                        leading: Icon(
+                          entry.key == 'kugou'
+                              ? Icons.music_note_rounded
+                              : entry.key == 'netease'
+                                  ? Icons.cloud_rounded
+                                  : Icons.album_rounded,
+                          color: scheme.primary,
+                        ),
+                        title: Text(entry.value),
+                        trailing: preference.platform == entry.key
+                            ? Icon(Icons.check_rounded, color: scheme.primary)
+                            : null,
+                        onTap: () => Navigator.of(sheetContext).pop(entry.key),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.settings_rounded, color: scheme.onSurfaceVariant),
+                title: const Text('打开设置'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(sheetContext).pop('__settings__'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || picked == null) return;
+    if (picked == '__settings__') {
+      _pushSettingsPage();
+      return;
+    }
+    await PlatformPreference.instance.set(picked);
+    if (!mounted) return;
+    Toast.success('搜索平台已切换为 ${PlatformPreference.labels[picked] ?? picked}');
+  }
+
+  void _pushSettingsPage() {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsPage(
@@ -988,10 +1065,11 @@ class _TopTabs extends StatelessWidget {
               child: const Icon(Icons.leaderboard_rounded, size: 20),
             ),
             const SizedBox(width: 8),
+            // 平台切换（设置入口移到弹窗底部，功能不丢）
             LiquidGlassCapsule(
               padding: const EdgeInsets.all(8),
               onTap: onSettingsTap,
-              child: const Icon(Icons.settings_rounded, size: 20),
+              child: const Icon(Icons.swap_horiz_rounded, size: 20),
             ),
           ],
         );
