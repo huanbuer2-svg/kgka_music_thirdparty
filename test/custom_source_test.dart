@@ -75,6 +75,25 @@ void main() {
       expect(decl.displayLabel, '酷狗');
     });
 
+    test('汽水音乐等小众平台也能显示中文名', () {
+      const decl = LxSourceDecl(
+        key: 'qs',
+        name: 'qs',
+        qualitys: ['128k', '320k', 'flac', 'spatial', 'hires'],
+      );
+      expect(decl.displayLabel, '汽水音乐');
+      expect(decl.canResolveUrl, isTrue);
+      expect(decl.qualitys, contains('spatial'));
+    });
+
+    test('空间音频档位能被识别', () {
+      expect(
+        ThirdPartyQuality.fromLxValue('spatial'),
+        ThirdPartyQuality.spatial,
+      );
+      expect(ThirdPartyQuality.spatial.label, '空间音频');
+    });
+
     test('JSON 往返保持字段', () {
       const decl = LxSourceDecl(
         key: 'wy',

@@ -69,6 +69,7 @@ const Map<String, String> lxSourceLabels = {
   'tx': 'QQ音乐',
   'wy': '网易云',
   'mg': '咪咕',
+  'qs': '汽水音乐',
   'local': '本地',
 };
 
@@ -247,6 +248,7 @@ enum ThirdPartyQuality {
   hiRes('hires', 'Hi-Res', 'HI-RES'),
   atmos('atmos', 'Atmos', 'ATMOS'),
   atmosPlus('atmos_plus', 'Atmos+', 'ATMOS+'),
+  spatial('spatial', '空间音频', 'SPATIAL'),
   master('master', 'Master', 'MASTER');
 
   const ThirdPartyQuality(this.lxValue, this.label, this.badge);

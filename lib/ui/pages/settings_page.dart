@@ -653,9 +653,17 @@ class SettingsPage extends StatelessWidget {
   Widget _buildSourceQualityCard(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final manager = CustomSourceManager.instance;
-    final enabledCount = manager.scripts
+    final enabledScripts = manager.scripts
         .where((script) => script.enabled && script.sources.isNotEmpty)
-        .length;
+        .toList();
+    final enabledCount = enabledScripts.length;
+    // 把启用音源支持的平台汇总出来，汽水音乐这类小众平台也能一眼看到
+    final platforms = <String>{};
+    for (final script in enabledScripts) {
+      script.sources.forEach((key, decl) {
+        if (decl.canResolveUrl) platforms.add(lxSourceLabels[key] ?? key);
+      });
+    }
 
     return Card(
       elevation: 0,
@@ -774,7 +782,11 @@ class SettingsPage extends StatelessWidget {
               leading: Icon(Icons.extension_rounded, color: scheme.primary),
               title: const Text('管理 / 导入音源'),
               subtitle: Text(
-                enabledCount == 0 ? '还没有导入音源' : '已启用 $enabledCount 个音源',
+                enabledCount == 0
+                    ? '还没有导入音源'
+                    : '$enabledCount 个音源 · ${platforms.join(' / ')}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12),
               ),
               trailing: const Icon(Icons.chevron_right_rounded),
