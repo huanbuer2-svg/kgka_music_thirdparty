@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/music_models.dart';
+import 'ceru_runtime.dart';
 import 'lx_runtime.dart';
 import 'lx_script.dart';
 
@@ -116,6 +117,51 @@ class CustomSourceManager extends ChangeNotifier {
 
   final List<CustomSourceScript> _scripts = [];
   final Map<String, LxRuntime> _runtimes = {};
+  final Map<String, CeruRuntime> _ceruRuntimes = {};
+
+  // ceru 运行时依赖的三份 JS，体积不小，读一次就缓存
+  static String? _ceruCryptoJs;
+  static String? _ceruPakoJs;
+  static String? _ceruShimJs;
+
+  /// 判断脚本是不是 manifestVersion 3 的 ceru 插件包。
+  static bool detectCeruFormat(String code) {
+    if (code.contains('exports.manifest')) return true;
+    final head = code.length > 4000 ? code.substring(0, 4000) : code;
+    return head.contains('manifestVersion') && head.contains('exports.');
+  }
+
+  /// 从插件 manifest 文本里取展示名（不启动 JS）。
+  static String? _ceruManifestName(String code) {
+    final match = RegExp(r'"name"\s*:\s*"([^"]{1,80})"').firstMatch(code);
+    return match?.group(1);
+  }
+
+  /// 更新插件配置项（ceru 插件的 apiUrl / apiKey 之类），并重新探测。
+  Future<void> setScriptConfig(String id, Map<String, String> config) async {
+    final index = _scripts.indexWhere((script) => script.id == id);
+    if (index < 0) return;
+    _disposeRuntime(id);
+    final updated = _scripts[index].copyWithConfig(config);
+    _scripts[index] = updated;
+    _cache.clear();
+    final probed = await _probe(updated);
+    _scripts[index] = probed;
+    await _persist();
+    notifyListeners();
+  }
+
+  static Future<void> _ensureCeruAssets() async {
+    _ceruCryptoJs ??= await rootBundle.loadString(
+      'lib/assets/custom_sources/ceru/crypto-js.js',
+    );
+    _ceruPakoJs ??= await rootBundle.loadString(
+      'lib/assets/custom_sources/ceru/pako-inflate.min.js',
+    );
+    _ceruShimJs ??= await rootBundle.loadString(
+      'lib/assets/custom_sources/ceru/ceru-shim.js',
+    );
+  }
   final Map<String, _CacheEntry> _cache = {};
   final List<String> _logLines = [];
   final http.Client _http = http.Client();
@@ -271,9 +317,15 @@ class CustomSourceManager extends ChangeNotifier {
     }
 
     final meta = LxScriptMeta.parse(trimmed);
-    final name = (meta.name?.trim().isNotEmpty == true)
-        ? meta.name!.trim()
-        : (fallbackName?.trim().isNotEmpty == true ? fallbackName!.trim() : '未命名音源');
+    final isCeru = detectCeruFormat(trimmed);
+    final ceruName = isCeru ? _ceruManifestName(trimmed) : null;
+    final name = (ceruName?.trim().isNotEmpty == true)
+        ? ceruName!.trim()
+        : (meta.name?.trim().isNotEmpty == true)
+            ? meta.name!.trim()
+            : (fallbackName?.trim().isNotEmpty == true
+                ? fallbackName!.trim()
+                : '未命名音源');
 
     // 同名脚本直接覆盖，避免用户重复导入后列表里出现一堆同名项
     final duplicated = _scripts.where((script) => script.name == name).toList();
@@ -286,6 +338,7 @@ class CustomSourceManager extends ChangeNotifier {
       id: '${DateTime.now().microsecondsSinceEpoch}',
       name: name,
       code: trimmed,
+      format: isCeru ? CustomSourceFormat.ceru : CustomSourceFormat.lx,
       version: meta.version ?? '',
       author: meta.author ?? '',
       description: meta.description ?? '',
@@ -333,6 +386,9 @@ class CustomSourceManager extends ChangeNotifier {
 
   /// 用脚本的实际运行结果补齐 `sources`，失败时把原因记进 `loadError`。
   Future<CustomSourceScript> _probe(CustomSourceScript script) async {
+    if (script.isCeru || detectCeruFormat(script.code)) {
+      return _probeCeru(script);
+    }
     final runtime = LxRuntime(debugTag: script.name);
     try {
       final result = await runtime.load(script.code);
@@ -344,6 +400,58 @@ class CustomSourceManager extends ChangeNotifier {
       final message = error is LxRuntimeException ? error.message : '$error';
       _appendLog('【${script.name}】加载失败：$message');
       return script.copyWith(sources: const {}, loadError: message);
+    }
+  }
+
+  /// 加载 ceru 插件包并把它注册的平台转换成通用音源声明。
+  Future<CustomSourceScript> _probeCeru(CustomSourceScript script) async {
+    CeruRuntime? runtime;
+    try {
+      await _ensureCeruAssets();
+      runtime = CeruRuntime(debugTag: script.name);
+      final info = await runtime.load(
+        pluginCode: script.code,
+        cryptoJs: _ceruCryptoJs!,
+        pakoJs: _ceruPakoJs!,
+        shimJs: _ceruShimJs!,
+        config: script.config,
+      );
+      _disposeCeruRuntime(script.id);
+      _ceruRuntimes[script.id] = runtime;
+
+      final decls = <String, LxSourceDecl>{};
+      for (final provider in info.providers) {
+        if (!provider.canResolve) continue;
+        decls[provider.id] = LxSourceDecl(
+          key: provider.id,
+          name: provider.label,
+          actions: const ['musicUrl'],
+          qualitys: provider.qualities,
+        );
+      }
+      final names = decls.values.map((decl) => decl.displayLabel).join('/');
+      _appendLog('【${script.name}】ceru 插件激活成功，平台：$names');
+      return script.copyWith(
+        sources: decls,
+        clearLoadError: true,
+        format: CustomSourceFormat.ceru,
+        config: {
+          for (final key in info.configKeys) key: script.config[key] ?? '',
+        },
+      );
+    } catch (error) {
+      runtime?.dispose();
+      final raw = error is LxRuntimeException ? error.message : '$error';
+      // 这类插件通常强依赖自建服务，缺配置时把话说清楚
+      final message = raw.contains('Invalid URL')
+          ? '需要先在音源设置里填写接口地址（apiUrl）'
+          : raw;
+      _appendLog('【${script.name}】加载失败：$message');
+      return script.copyWith(
+        sources: const {},
+        loadError: message,
+        format: CustomSourceFormat.ceru,
+      );
     }
   }
 
@@ -444,8 +552,12 @@ class CustomSourceManager extends ChangeNotifier {
   }
 
   void _disposeRuntime(String id) {
-    final runtime = _runtimes.remove(id);
-    runtime?.dispose();
+    _runtimes.remove(id)?.dispose();
+    _ceruRuntimes.remove(id)?.dispose();
+  }
+
+  void _disposeCeruRuntime(String id) {
+    _ceruRuntimes.remove(id)?.dispose();
   }
 
   // -------------------------------------------------------------------- 解析
@@ -530,12 +642,20 @@ class CustomSourceManager extends ChangeNotifier {
         preferred: (preferredQuality ?? _quality).lxValue,
       );
       try {
-        final runtime = await _runtimeFor(script);
-        final url = await runtime.fetchMusicUrl(
-          source: platform,
-          musicInfo: musicInfo,
-          quality: quality,
-        );
+        final String? url;
+        if (script.isCeru) {
+          url = await _resolveCeruUrl(script, song, platform, quality);
+        } else {
+          final runtime = await _runtimeFor(script);
+          url = await runtime.fetchMusicUrl(
+            source: platform,
+            musicInfo: musicInfo,
+            quality: quality,
+          );
+        }
+        if (url == null || url.isEmpty) {
+          throw LxRuntimeException('插件没有返回播放地址');
+        }
         final resolve = CustomSourceResolve(
           url: url,
           scriptName: script.name,
@@ -557,6 +677,52 @@ class CustomSourceManager extends ChangeNotifier {
     throw LxRuntimeException(
       lastError?.toString() ?? '没有脚本支持 ${lxSourceLabels[platform] ?? platform} 音源',
     );
+  }
+
+  /// ceru 插件按「资源引用」解析，不是 lx 的 hash/musicInfo。
+  Future<String?> _resolveCeruUrl(
+    CustomSourceScript script,
+    Song song,
+    String platform,
+    String quality,
+  ) async {
+    final runtime = _ceruRuntimes[script.id] ?? await _probeCeruRuntime(script);
+    if (runtime == null) throw LxRuntimeException('插件未就绪');
+    final pluginId = runtime.info?.id ?? '';
+    final trackId = song.id.isNotEmpty ? song.id : song.hash;
+    return runtime.resolveUrl(
+      platform,
+      {
+        'pluginId': pluginId,
+        'providerId': platform,
+        'kind': 'track',
+        'id': trackId,
+        'scope': 'provider',
+        // 顺带带上元信息，个别平台按名字匹配时用得上
+        'title': song.title,
+        'subtitle': song.artist,
+      },
+      quality,
+    );
+  }
+
+  Future<CeruRuntime?> _probeCeruRuntime(CustomSourceScript script) async {
+    try {
+      await _ensureCeruAssets();
+      final runtime = CeruRuntime(debugTag: script.name);
+      await runtime.load(
+        pluginCode: script.code,
+        cryptoJs: _ceruCryptoJs!,
+        pakoJs: _ceruPakoJs!,
+        shimJs: _ceruShimJs!,
+        config: script.config,
+      );
+      _ceruRuntimes[script.id] = runtime;
+      return runtime;
+    } catch (error) {
+      _appendLog('【${script.name}】运行时初始化失败：$error');
+      return null;
+    }
   }
 
   Future<LxRuntime> _runtimeFor(CustomSourceScript script) async {

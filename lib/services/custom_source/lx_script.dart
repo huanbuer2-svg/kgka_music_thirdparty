@@ -74,6 +74,13 @@ const Map<String, String> lxSourceLabels = {
 };
 
 /// 一条已导入的自定义音源脚本。
+/// 脚本格式。
+///
+/// - [lx]：lx-music 传统单文件脚本，执行后靠 `send(inited)` 上报音源
+/// - [ceru]：manifestVersion 3 的模块化插件包，执行后导出 `activate(ctx)`，
+///   平台能力通过 `ctx.providers.register()` 注册
+enum CustomSourceFormat { lx, ceru }
+
 class CustomSourceScript {
   CustomSourceScript({
     required this.id,
@@ -89,6 +96,8 @@ class CustomSourceScript {
     this.originUrl,
     this.sources = const {},
     this.loadError,
+    this.config = const {},
+    this.format = CustomSourceFormat.lx,
   });
 
   final String id;
@@ -111,8 +120,16 @@ class CustomSourceScript {
   /// 上一次加载失败的报错（成功为 null）。仅内存态，不持久化。
   final String? loadError;
 
+  /// 插件声明需要用户填写的配置项（ceru 插件常见 apiUrl / apiKey）。
+  final Map<String, String> config;
+
+  /// 脚本格式：传统 lx 单文件脚本，还是 ceru 模块化插件包。
+  final CustomSourceFormat format;
+
   /// 脚本体积（字节），用于界面展示。
   int get sizeInBytes => utf8.encode(code).length;
+
+  bool get isCeru => format == CustomSourceFormat.ceru;
 
   List<String> get sourceLabels => sources.keys
       .where((key) => sources[key]?.canResolveUrl == true)
@@ -128,6 +145,8 @@ class CustomSourceScript {
     Map<String, LxSourceDecl>? sources,
     String? loadError,
     bool clearLoadError = false,
+    Map<String, String>? config,
+    CustomSourceFormat? format,
   }) {
     return CustomSourceScript(
       id: id,
@@ -143,6 +162,8 @@ class CustomSourceScript {
       originUrl: originUrl,
       sources: sources ?? this.sources,
       loadError: clearLoadError ? null : (loadError ?? this.loadError),
+      config: config ?? this.config,
+      format: format ?? this.format,
     );
   }
 
@@ -159,6 +180,8 @@ class CustomSourceScript {
     'importedAt': importedAt?.toIso8601String(),
     if (originUrl != null) 'originUrl': originUrl,
     'sources': sources.map((key, value) => MapEntry(key, value.toJson())),
+    'format': format.name,
+    if (config.isNotEmpty) 'config': config,
   };
 
   factory CustomSourceScript.fromJson(Map<String, dynamic> json) {
@@ -188,6 +211,33 @@ class CustomSourceScript {
       importedAt: importedAt is String ? DateTime.tryParse(importedAt) : null,
       originUrl: json['originUrl'] as String?,
       sources: sources,
+      format: CustomSourceFormat.values.firstWhere(
+        (item) => item.name == json['format'],
+        orElse: () => CustomSourceFormat.lx,
+      ),
+      config: (json['config'] as Map?)?.map((k, v) => MapEntry('$k', '$v')) ??
+          const {},
+    );
+  }
+
+  /// 复制并替换部分字段（配置变更时用）。
+  CustomSourceScript copyWithConfig(Map<String, String> config) {
+    return CustomSourceScript(
+      id: id,
+      name: name,
+      code: code,
+      version: version,
+      author: author,
+      description: description,
+      repository: repository,
+      enabled: enabled,
+      order: order,
+      importedAt: importedAt,
+      originUrl: originUrl,
+      sources: sources,
+      loadError: loadError,
+      config: config,
+      format: format,
     );
   }
 }

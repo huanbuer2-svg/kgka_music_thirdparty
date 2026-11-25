@@ -129,6 +129,37 @@ iOS 的 ATS 与 macOS 沙盒网络权限已在本次改动里补上。
 引擎端到端用例在 `flutter test` 下会先尝试加载 `quickjs_c_bridge.dll`，
 加载不到就自动 skip（CI 里不会红）。
 
+## ceru 插件（manifestVersion 3）
+
+除了 lx 传统单文件脚本，现在还支持 **ceru-js@1** 的模块化插件包
+（形如 `exports.manifest = { manifestVersion: 3, engines: { hostApi: '^3.0.0',
+logicRuntime: 'ceru-js@1' } }`）。
+
+区别：
+
+| | lx 脚本 | ceru 插件 |
+|---|---|---|
+| 入口 | 执行即 `send(inited)` | 导出 `activate(ctx)` |
+| 能力 | `on(EVENT_NAMES.request)` 事件 | `ctx.providers.register(id, {tracks})` |
+| 平台声明 | `sources` 字段 | `manifest.provides.providers[]`（带音质档位） |
+
+运行时实现在 `lib/services/custom_source/ceru_runtime.dart`，
+QuickJS 里注入三份 JS（`lib/assets/custom_sources/ceru/`）：
+
+- `crypto-js.js` —— QuickJS 没有原生 crypto，摘要/AES 靠它
+- `pako-inflate.min.js` —— 服务端 gzip 响应的解压
+- `ceru-shim.js` —— 宿主垫片（ctx / `__ceruRequire` / Buffer / HTTP 桥）
+
+`ceru-shim.js` 是**宿主无关**的，Node 侧可以用同一份文件驱动插件做调试：
+`node ceru_node_test.js <插件.js> tx 晴天`。
+
+### 这类插件通常需要配置
+
+很多 ceru 插件（例如「聆澜音源」）把解析逻辑放在作者自己的服务器上，
+manifest 的 `entry.share.configKeys` 会声明 `apiUrl` / `apiKey`。
+不填的话插件会抛 `Invalid URL`，界面上会提示「需要先填写接口地址」，
+在音源卡片的「⋯ → 配置」里填即可。
+
 ## 内置音源
 
 安装包内置 **星澜音乐源**（`lib/assets/custom_sources/xinglan.js`），首次启动自动导入并启用，

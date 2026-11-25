@@ -530,6 +530,9 @@ class _CustomSourcePageState extends State<CustomSourcePage> {
                   case 'reload':
                     unawaited(_reload(script));
                     break;
+                  case 'config':
+                    unawaited(_openConfigDialog(script));
+                    break;
                   case 'delete':
                     unawaited(_confirmDelete(script));
                     break;
@@ -537,6 +540,8 @@ class _CustomSourcePageState extends State<CustomSourcePage> {
               },
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'reload', child: Text('重新加载')),
+                if (script.isCeru || script.config.keys.isNotEmpty)
+                  const PopupMenuItem(value: 'config', child: Text('配置')),
                 const PopupMenuItem(value: 'delete', child: Text('删除')),
               ],
             ),
@@ -544,6 +549,102 @@ class _CustomSourcePageState extends State<CustomSourcePage> {
         ),
       ),
     );
+  }
+
+  /// 插件配置（ceru 插件常见 apiUrl / apiKey，指向作者的服务）。
+  Future<void> _openConfigDialog(CustomSourceScript script) async {
+    final keys = script.config.keys.toList();
+    if (keys.isEmpty) {
+      Toast.info('这个音源不需要额外配置');
+      return;
+    }
+    final controllers = {
+      for (final key in keys) key: TextEditingController(text: script.config[key]),
+    };
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('配置 ${script.name}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '这类插件把解析工作放在作者自己的服务器上，需要填写接口地址与密钥才能使用。',
+                style: TextStyle(fontSize: 12, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              for (final key in keys) ...[
+                TextField(
+                  controller: controllers[key],
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    labelText: _configLabel(key),
+                    hintText: _configHint(key),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('保存并重载'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true || !mounted) return;
+
+    final config = {for (final key in keys) key: controllers[key]!.text.trim()};
+    setState(() => _busy = true);
+    try {
+      await _manager.setScriptConfig(script.id, config);
+      final latest = _manager.scripts.firstWhere(
+        (item) => item.id == script.id,
+        orElse: () => script,
+      );
+      if (!mounted) return;
+      if (latest.loadError != null) {
+        Toast.error('配置已保存，但加载仍失败：${latest.loadError}');
+      } else {
+        Toast.success('配置已保存');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _configLabel(String key) {
+    switch (key) {
+      case 'apiUrl':
+        return '接口地址（apiUrl）';
+      case 'apiKey':
+        return '接口密钥（apiKey）';
+      case 'token':
+        return '访问令牌（token）';
+      default:
+        return key;
+    }
+  }
+
+  String _configHint(String key) {
+    switch (key) {
+      case 'apiUrl':
+        return 'https://your-server.example.com';
+      case 'apiKey':
+        return '向音源作者获取';
+      default:
+        return '';
+    }
   }
 
   Future<void> _reload(CustomSourceScript script) async {
