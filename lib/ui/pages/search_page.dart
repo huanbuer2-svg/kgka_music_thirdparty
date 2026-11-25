@@ -10,6 +10,7 @@ import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/custom_source/qishui_link.dart';
 import '../../services/music_api.dart';
+import '../../services/qishui_api.dart';
 import '../../services/platform_preference.dart';
 import '../../services/search_history_service.dart';
 import '../widgets/artwork.dart';
@@ -43,7 +44,7 @@ class SearchPage extends StatefulWidget {
 }
 
 /// 搜索平台。
-enum _SearchPlatform { kugou, netease, qq }
+enum _SearchPlatform { kugou, netease, qq, qishui }
 
 /// 搜索类型。
 enum _SearchType { song, album }
@@ -220,6 +221,7 @@ class _SearchPageState extends State<SearchPage> {
             keywords,
           ),
           _SearchPlatform.qq => await widget.api.searchQqSongs(keywords),
+          _SearchPlatform.qishui => await QishuiApi.instance.search(keywords),
           _SearchPlatform.kugou => await widget.api.searchSongs(keywords),
         };
         if (!_isCurrentSearch(serial, keywords, type, platform)) return;
@@ -1137,6 +1139,7 @@ class _PlatformSelector extends StatelessWidget {
                   _SearchPlatform.kugou => '酷狗',
                   _SearchPlatform.netease => '网易云',
                   _SearchPlatform.qq => 'QQ音乐',
+                  _SearchPlatform.qishui => '汽水',
                 },
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: platform == p

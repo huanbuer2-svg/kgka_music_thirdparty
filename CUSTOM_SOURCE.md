@@ -168,6 +168,23 @@ manifest 的 `entry.share.configKeys` 会声明 `apiUrl` / `apiKey`。
 
 内置前会用 `tool/lx_host_check.cjs` 过一遍宿主自检，跑不通的脚本不会进包。
 
+## 汽水音乐（内置直连，不依赖插件）
+
+汽水官方接口需要抖音的 `x-gorgon` / `msToken` 签名和设备 cookie，
+客户端直连只会拿到 **200 空响应**（实测重试 3 次全空）。
+
+所以这里走第三方聚合后端（星海），它已经替我们完成签名与设备注册：
+
+| 能力 | 接口 |
+|---|---|
+| 搜索 | `GET https://yy1.zddyr.top/lx/api/qs.php?action=search&keywords=&page=` |
+| 播放 | `GET https://yy1.zddyr.top/lx/api/?source=qs&name=&singer=&songmid=&quality=` |
+
+播放返回的 `source_url` 必须拼上 `key` 才能取流，`QishuiApi` 已处理。
+
+搜索页平台切换里有「汽水」，播放时**固定走这条直连**，不会被第三方插件抢走
+（插件对 qs 的直连会被抖音风控拦掉）。
+
 ## 多平台与下载
 
 **搜索平台**：搜索页顶部可切 酷狗 / 网易云 / QQ音乐。

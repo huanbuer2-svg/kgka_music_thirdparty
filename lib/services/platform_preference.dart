@@ -17,6 +17,7 @@ class PlatformPreference extends ChangeNotifier {
     'kugou': '酷狗',
     'netease': '网易云',
     'qq': 'QQ音乐',
+    'qishui': '汽水',
   };
 
   String _platform = 'kugou';
