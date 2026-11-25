@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 默认搜索平台偏好。
@@ -28,6 +28,19 @@ class PlatformPreference extends ChangeNotifier {
   bool get isInitialized => _initialized;
 
   String get label => labels[_platform] ?? _platform;
+
+  static IconData iconFor(String key) {
+    switch (key) {
+      case 'netease':
+        return Icons.cloud_rounded;
+      case 'qq':
+        return Icons.album_rounded;
+      case 'qishui':
+        return Icons.waves_rounded;
+      default:
+        return Icons.music_note_rounded;
+    }
+  }
 
   Future<void> init() async {
     if (_initialized) return;

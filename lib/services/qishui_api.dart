@@ -16,6 +16,21 @@ import '../../models/music_models.dart';
 /// - 播放 `GET /?source=qs&name=&singer=&songmid=&quality=`
 ///
 /// 播放返回的 `source_url` 还需要拼上 `key` 才能直接取流。
+/// 汽水的官方榜单（汽水没有公开的榜单目录接口，这四个是固定入口）。
+class QishuiTopList {
+  const QishuiTopList({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.cover,
+  });
+
+  final String id;
+  final String title;
+  final String description;
+  final String cover;
+}
+
 class QishuiApi {
   QishuiApi._();
 
@@ -31,6 +46,37 @@ class QishuiApi {
             '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
   };
+
+  /// 四个官方榜（id 与汽水 App 内一致）。
+  static const List<QishuiTopList> topLists = [
+    QishuiTopList(
+      id: '7036274230471712007',
+      title: '热歌榜',
+      description: '每周热度最高的 50 首',
+      cover: 'https://p3-luna.douyinpic.com/img/tos-cn-i-b829550vbb/'
+          'd0d8d48461a62748e84689cdf049b19a.png~tplv-b829550vbb-resize:960:960.png',
+    ),
+    QishuiTopList(
+      id: '7060812597884869927',
+      title: '新歌榜',
+      description: '近期发行的热门新歌',
+      cover: 'https://p3-luna.douyinpic.com/img/tos-cn-i-b829550vbb/'
+          'f12f7eb5b54d0a3e7a4c0d2e3e1e2b6a.png~tplv-b829550vbb-resize:960:960.png',
+    ),
+    QishuiTopList(
+      id: '7061475546400005410',
+      title: '欧美榜',
+      description: '热度最高的外文歌',
+      cover: 'https://p3-luna.douyinpic.com/img/tos-cn-i-b829550vbb/'
+          '3374755015aeb1f2e6e0c1a3f0e8b1c2.png~tplv-b829550vbb-resize:960:960.png',
+    ),
+    QishuiTopList(
+      id: '7061475546400005411',
+      title: '国风榜',
+      description: '国风与古风热门单曲',
+      cover: '',
+    ),
+  ];
 
   http.Client? _client;
 
@@ -119,6 +165,80 @@ class QishuiApi {
     }
     debugPrint('[KA Music][qishui] ${song.title} → ${data['quality'] ?? quality}');
     return url;
+  }
+
+  /// 拉某个榜单的曲目（官方 charts 接口）。
+  Future<List<Song>> topListDetail(String chartId) async {
+    final uri = Uri.parse('https://api.qishui.com/luna/pc/charts/$chartId')
+        .replace(
+          queryParameters: const {
+            'aid': '386088',
+            'device_platform': 'web',
+            'channel': 'pc_web',
+          },
+        );
+    final response = await _http.get(
+      uri,
+      headers: const {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        'x-luna-background-type': 'foreground',
+        'x-luna-is-background-req': '0',
+        'x-luna-is-local-user': '1',
+        'Referer': 'https://music.douyin.com/',
+      },
+    ).timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) {
+      throw Exception('汽水榜单失败：HTTP ${response.statusCode}');
+    }
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (decoded is! Map) return const [];
+    final chart = decoded['chart'];
+    if (chart is! Map) return const [];
+    final ranks = chart['track_ranks'];
+    if (ranks is! List) return const [];
+
+    final songs = <Song>[];
+    for (final entry in ranks) {
+      if (entry is! Map) continue;
+      final track = entry['track'];
+      if (track is! Map) continue;
+      final id = '${track['id'] ?? ''}';
+      if (id.isEmpty) continue;
+      final artists = track['artists'];
+      final artist = artists is List
+          ? artists
+              .whereType<Map>()
+              .map((item) => '${item['name'] ?? ''}')
+              .where((name) => name.isNotEmpty)
+              .join(' / ')
+          : '';
+      final album = track['album'];
+      final covers = (album is Map && album['url_cover'] is Map)
+          ? (album['url_cover']['urls'] as List?)
+          : null;
+      final rawDuration = track['duration'];
+      var durationMs = rawDuration is num ? rawDuration.toInt() : 0;
+      if (durationMs > 10000000) durationMs = durationMs ~/ 1000;
+      songs.add(
+        Song(
+          id: id,
+          title: '${track['name'] ?? '未知歌曲'}',
+          artist: artist.isEmpty ? '未知艺人' : artist,
+          hash: '',
+          albumName: album is Map ? '${album['name'] ?? ''}' : null,
+          coverUrl: (covers != null && covers.isNotEmpty)
+              ? '${covers.first}'
+              : null,
+          duration: durationMs > 0
+              ? Duration(milliseconds: durationMs)
+              : null,
+          source: SongSource.qs,
+        ),
+      );
+    }
+    return songs;
   }
 
   void dispose() {
