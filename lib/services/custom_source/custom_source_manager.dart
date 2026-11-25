@@ -480,8 +480,10 @@ class CustomSourceManager extends ChangeNotifier {
   /// 加载 ceru 插件包并把它注册的平台转换成通用音源声明。
   Future<CustomSourceScript> _probeCeru(CustomSourceScript script) async {
     CeruRuntime? runtime;
+    var stage = '读取运行时资源';
     try {
       await _ensureCeruAssets();
+      stage = '启动插件引擎';
       runtime = CeruRuntime(debugTag: script.name);
       final info = await runtime.load(
         pluginCode: script.code,
@@ -490,6 +492,7 @@ class CustomSourceManager extends ChangeNotifier {
         shimJs: _ceruShimJs!,
         config: script.config,
       );
+      stage = '注册音源平台';
       _disposeCeruRuntime(script.id);
       _ceruRuntimes[script.id] = runtime;
 
@@ -516,11 +519,12 @@ class CustomSourceManager extends ChangeNotifier {
     } catch (error) {
       runtime?.dispose();
       final raw = error is LxRuntimeException ? error.message : '$error';
-      // 这类插件通常强依赖自建服务，缺配置时把话说清楚
+      // 这类插件通常强依赖自建服务，缺配置时把话说清楚；
+      // 其余错误带上卡住的阶段，便于定位（QuickJS 的问题在界面外看不到）
       final message = raw.contains('Invalid URL')
           ? '需要先在音源设置里填写接口地址（apiUrl）'
-          : raw;
-      _appendLog('【${script.name}】加载失败：$message');
+          : '[$stage] $raw';
+      _appendLog('【${script.name}】加载失败 $message');
       return script.copyWith(
         sources: const {},
         loadError: message,
