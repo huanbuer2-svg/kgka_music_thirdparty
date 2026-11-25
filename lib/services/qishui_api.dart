@@ -133,8 +133,52 @@ class QishuiApi {
   }
 
   /// 取播放地址。返回可直接给播放器的完整 URL（已拼上 key）。
+  ///
+  /// 应用的音质档位是酷狗那套（128/320/flac/hires/master），
+  /// 汽水后端只认 128k/320k/flac，且高档位不一定每首歌都有，
+  /// 所以这里按档位降级试，避免「点了没反应」。
   Future<String?> resolveUrl(Song song, {String quality = '320k'}) async {
     if (song.id.isEmpty) return null;
+    for (final candidate in _qualityCandidates(quality)) {
+      final url = await _requestUrl(song, candidate);
+      if (url != null && url.isNotEmpty) {
+        if (candidate != _normalizeQuality(quality)) {
+          debugPrint('[KA Music][qishui] ${song.title} 降级到 $candidate');
+        }
+        return url;
+      }
+    }
+    return null;
+  }
+
+  /// 档位降级链：首选 → 320k → 128k。
+  static List<String> _qualityCandidates(String quality) {
+    final preferred = _normalizeQuality(quality);
+    switch (preferred) {
+      case 'flac':
+        return const ['flac', '320k', '128k'];
+      case '320k':
+        return const ['320k', '128k'];
+      default:
+        return const ['128k'];
+    }
+  }
+
+  /// 把应用里的档位名映射成汽水后端认的值。
+  static String _normalizeQuality(String quality) {
+    final value = quality.toLowerCase();
+    if (value.contains('flac') ||
+        value == 'hires' ||
+        value == 'master' ||
+        value.contains('atmos')) {
+      return 'flac';
+    }
+    if (value.startsWith('320')) return '320k';
+    if (value.startsWith('128')) return '128k';
+    return '320k';
+  }
+
+  Future<String?> _requestUrl(Song song, String quality) async {
     final uri = Uri.parse(_base).replace(
       queryParameters: {
         'source': 'qs',
@@ -144,30 +188,62 @@ class QishuiApi {
         'quality': quality,
       },
     );
-    final response = await _http.get(uri, headers: _headers).timeout(_timeout);
-    if (response.statusCode != 200) {
-      throw Exception('汽水取地址失败：HTTP ${response.statusCode}');
+    try {
+      final response = await _http.get(uri, headers: _headers).timeout(_timeout);
+      if (response.statusCode != 200) return null;
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map) return null;
+      final code = decoded['code'];
+      if (code != null && code != 200) {
+        debugPrint('[KA Music][qishui] $quality 取址失败：${decoded['msg'] ?? code}');
+        return null;
+      }
+      final data = decoded['data'];
+      if (data is! Map) return null;
+      var url = data['source_url'] ?? data['url'];
+      if (url is! String || url.isEmpty) return null;
+      // 抖音流必须带 key 才能访问
+      final key = data['key'];
+      if (key is String && key.isNotEmpty && !url.contains('key=')) {
+        url = '$url${url.contains('?') ? '&' : '?'}key=${Uri.encodeComponent(key)}';
+      }
+      // 抖音 CDN 会先 302 到一个带 x-redirect 的中转域名，
+      // 部分播放器（尤其 iOS AVPlayer）对「302 + 无扩展名 URL」支持不好，
+      // 这里先自己跟一次，把最终地址交给播放器。
+      final resolved = await _resolveRedirect(url);
+      debugPrint('[KA Music][qishui] ${song.title} → $quality'
+          '${resolved != null && resolved != url ? '（已跟随重定向）' : ''}');
+      return resolved ?? url;
+    } catch (error) {
+      debugPrint('[KA Music][qishui] $quality 异常：$error');
+      return null;
     }
-    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-    if (decoded is! Map) throw Exception('汽水取地址返回格式异常');
-    final code = decoded['code'];
-    if (code != null && code != 200) {
-      throw Exception('汽水取地址失败：${decoded['msg'] ?? code}');
-    }
-    final data = decoded['data'];
-    if (data is! Map) return null;
-    var url = data['source_url'] ?? data['url'];
-    if (url is! String || url.isEmpty) return null;
-    // 抖音流必须带 key 才能访问
-    final key = data['key'];
-    if (key is String && key.isNotEmpty && !url.contains('key=')) {
-      url = '$url${url.contains('?') ? '&' : '?'}key=${Uri.encodeComponent(key)}';
-    }
-    debugPrint('[KA Music][qishui] ${song.title} → ${data['quality'] ?? quality}');
-    return url;
   }
 
-  /// 拉某个榜单的曲目（官方 charts 接口）。
+  /// 跟随一次重定向，返回最终可直连的地址；失败时返回 null 由调用方兜底。
+  Future<String?> _resolveRedirect(String url) async {
+    try {
+      final request = http.Request('GET', Uri.parse(url));
+      // 只要 1 字节，避免把整首歌拉下来
+      request.headers['Range'] = 'bytes=0-0';
+      final client = _client ??= http.Client();
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 12));
+      final finalUrl = response.request?.url.toString();
+      // 及时断流
+      unawaited(response.stream.drain<void>().catchError((_) {}));
+      if (finalUrl != null && finalUrl.isNotEmpty && finalUrl != url) {
+        return finalUrl;
+      }
+      return null;
+    } catch (error) {
+      debugPrint('[KA Music][qishui] 跟随重定向失败：$error');
+      return null;
+    }
+  }
+
+  /// 拉某个榜单的曲目（官方 charts 接口，不需要抖音签名）。
   Future<List<Song>> topListDetail(String chartId) async {
     final uri = Uri.parse('https://api.qishui.com/luna/pc/charts/$chartId')
         .replace(
