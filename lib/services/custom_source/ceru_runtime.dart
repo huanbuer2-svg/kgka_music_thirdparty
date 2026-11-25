@@ -59,6 +59,7 @@ class CeruPluginInfo {
     required this.author,
     required this.configKeys,
     required this.providers,
+    this.config = const {},
   });
 
   final String id;
@@ -69,6 +70,9 @@ class CeruPluginInfo {
 
   /// 需要用户填写的配置项（常见是 apiUrl / apiKey，指向插件作者的服务）。
   final List<String> configKeys;
+
+  /// 插件 manifest 里自带的配置默认值（多数插件会把 apiUrl/apiKey 直接写在这里）。
+  final Map<String, String> config;
 
   final List<CeruProvider> providers;
 
@@ -236,6 +240,14 @@ class CeruRuntime {
       throw LxRuntimeException('插件没有注册任何音源平台');
     }
 
+    final manifestConfig = manifestMap['config'];
+    final configDefaults = <String, String>{};
+    if (manifestConfig is Map) {
+      manifestConfig.forEach((key, value) {
+        if (value != null) configDefaults['$key'] = '$value';
+      });
+    }
+
     _info = CeruPluginInfo(
       id: '${manifestMap['id'] ?? ''}',
       name: '${manifestMap['name'] ?? 'ceru 插件'}',
@@ -244,6 +256,7 @@ class CeruRuntime {
       author: '${manifestMap['author'] ?? ''}',
       configKeys: configKeys,
       providers: providers,
+      config: configDefaults,
     );
     _appendLog(
       '【${_info!.name}】激活成功，平台：${providers.map((p) => p.label).join('/')}',

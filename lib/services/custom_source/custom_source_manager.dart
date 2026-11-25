@@ -512,8 +512,14 @@ class CustomSourceManager extends ChangeNotifier {
         sources: decls,
         clearLoadError: true,
         format: CustomSourceFormat.ceru,
+        // 把实际生效的配置写回条目，界面上「配置」就能看到插件自带的
+        // apiUrl / apiKey 已经填好（用户手动填过的优先）
         config: {
-          for (final key in info.configKeys) key: script.config[key] ?? '',
+          ...info.config,
+          for (final key in info.configKeys)
+            key: (script.config[key]?.isNotEmpty ?? false)
+                ? script.config[key]!
+                : (info.config[key] ?? ''),
         },
       );
     } catch (error) {
