@@ -129,6 +129,20 @@ iOS 的 ATS 与 macOS 沙盒网络权限已在本次改动里补上。
 引擎端到端用例在 `flutter test` 下会先尝试加载 `quickjs_c_bridge.dll`，
 加载不到就自动 skip（CI 里不会红）。
 
+## MusicFree 插件
+
+支持 MusicFree 格式（CommonJS 模块）：执行后 `module.exports` 直接暴露
+`search` / `getMediaSource` / `getLyric` / `getTopLists` 等方法。
+
+运行时：`lib/services/custom_source/musicfree_runtime.dart` +
+`lib/assets/custom_sources/musicfree/musicfree-shim.js`（补齐 QuickJS 缺的
+`fetch` / `setTimeout` / `AbortController`，HTTP 走 `__mfSend` 桥接）。
+
+平台键从插件的 `platform` 名字推断（含「汽水」→ `qs`、「网易」→ `wy` …），
+这样能和官方歌曲的平台键对上，播放时按同一个键选插件。
+
+已实测的插件：`星海音乐源 - 汽水音乐 (qs) v1.3.0` —— 搜索、取播放地址、榜单都正常。
+
 ## ceru 插件（manifestVersion 3）
 
 除了 lx 传统单文件脚本，现在还支持 **ceru-js@1** 的模块化插件包

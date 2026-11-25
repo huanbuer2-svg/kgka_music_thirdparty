@@ -5,10 +5,13 @@ import 'package:flutter/services.dart';
 import '../design_tokens.dart';
 
 import '../../controllers/auth_controller.dart';
+import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../../services/custom_source/custom_source_manager.dart';
 import 'artwork.dart';
+import 'download_quality_sheet.dart';
 import 'song_artwork.dart';
 import 'toast.dart';
 
@@ -34,7 +37,23 @@ Future<void> showSongActionSheet({
   required BuildContext context,
   required Song song,
   required List<SongSheetAction> actions,
+  /// 传入后会自动追加「下载歌曲」项（带音质选择），
+  /// 避免每个列表页各写一遍。
+  DownloadController? downloads,
 }) {
+  final mergedActions = <SongSheetAction>[
+    if (downloads != null &&
+        !song.isCloudDrive &&
+        !actions.any((action) => action.title == '下载歌曲'))
+      SongSheetAction(
+        icon: Icons.download_rounded,
+        title: '下载歌曲',
+        subtitle: '可选择无损 / Hi-Res / Atmos / Master',
+        onTap: () => _downloadSongWithQuality(context, song, downloads),
+      ),
+    ...actions,
+  ];
+  actions = mergedActions;
   final isLandscape = MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
   // 左侧滑入弹窗是车机专属交互，普通横屏用标准底部弹窗。
   final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
@@ -196,6 +215,29 @@ Future<void> showSongActionSheet({
       );
     },
   );
+}
+
+/// 选音质后下载（列表菜单共用）。
+Future<void> _downloadSongWithQuality(
+  BuildContext context,
+  Song song,
+  DownloadController downloads,
+) async {
+  // 上一个弹层还在收起动画中，稍等再开新的
+  await Future<void>.delayed(const Duration(milliseconds: 220));
+  if (!context.mounted) return;
+  final choice = await showDownloadQualitySheet(
+    context: context,
+    songTitle: song.title,
+    thirdPartyAvailable: CustomSourceManager.instance.hasEnabledScript,
+  );
+  if (choice == null || !context.mounted) return;
+  await downloads.download(
+    song,
+    choice.official,
+    thirdPartyQuality: choice.thirdParty,
+  );
+  if (context.mounted) Toast.info('已加入下载队列：${choice.label}');
 }
 
 class _GridItem extends StatelessWidget {

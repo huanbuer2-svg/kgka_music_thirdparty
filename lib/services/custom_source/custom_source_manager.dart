@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/music_models.dart';
 import 'ceru_runtime.dart';
 import 'lx_runtime.dart';
+import 'musicfree_runtime.dart';
 import 'lx_script.dart';
 
 /// 随安装包内置的音源脚本。
@@ -118,6 +119,23 @@ class CustomSourceManager extends ChangeNotifier {
   final List<CustomSourceScript> _scripts = [];
   final Map<String, LxRuntime> _runtimes = {};
   final Map<String, CeruRuntime> _ceruRuntimes = {};
+  final Map<String, MusicFreeRuntime> _musicFreeRuntimes = {};
+  static String? _musicFreeShimJs;
+
+  /// 判断是不是 MusicFree 插件（CommonJS 模块 + 无 lx/ceru 特征）。
+  static bool detectMusicFreeFormat(String code) {
+    if (!code.contains('module.exports')) return false;
+    if (code.contains('EVENT_NAMES') || code.contains('globalThis.lx')) return false;
+    if (code.contains('manifestVersion')) return false;
+    return true;
+  }
+
+  static Future<void> _ensureMusicFreeAssets() async {
+    _musicFreeShimJs ??= await rootBundle.loadString(
+      'lib/assets/custom_sources/musicfree/musicfree-shim.js',
+    );
+  }
+
 
   // ceru 运行时依赖的三份 JS，体积不小，读一次就缓存
   static String? _ceruCryptoJs;
@@ -129,6 +147,14 @@ class CustomSourceManager extends ChangeNotifier {
     if (code.contains('exports.manifest')) return true;
     final head = code.length > 4000 ? code.substring(0, 4000) : code;
     return head.contains('manifestVersion') && head.contains('exports.');
+  }
+
+  /// MusicFree 插件的名字写在头部注释 `@name` 里，LxScriptMeta 已能解析；
+  /// 少数插件只导出 platform 字段，这里兜底抓一下。
+  static String? _musicFreeName(String code) {
+    final match = RegExp(r'platform\s*:\s*["\x27]([^"\x27]{1,60})["\x27]')
+        .firstMatch(code.length > 8000 ? code.substring(0, 8000) : code);
+    return match?.group(1);
   }
 
   /// 从插件 manifest 文本里取展示名（不启动 JS）。
@@ -318,9 +344,13 @@ class CustomSourceManager extends ChangeNotifier {
 
     final meta = LxScriptMeta.parse(trimmed);
     final isCeru = detectCeruFormat(trimmed);
+    final isMusicFree = !isCeru && detectMusicFreeFormat(trimmed);
     final ceruName = isCeru ? _ceruManifestName(trimmed) : null;
+    final musicFreeName = isMusicFree ? _musicFreeName(trimmed) : null;
     final name = (ceruName?.trim().isNotEmpty == true)
         ? ceruName!.trim()
+        : (musicFreeName?.trim().isNotEmpty == true)
+            ? musicFreeName!.trim()
         : (meta.name?.trim().isNotEmpty == true)
             ? meta.name!.trim()
             : (fallbackName?.trim().isNotEmpty == true
@@ -338,7 +368,11 @@ class CustomSourceManager extends ChangeNotifier {
       id: '${DateTime.now().microsecondsSinceEpoch}',
       name: name,
       code: trimmed,
-      format: isCeru ? CustomSourceFormat.ceru : CustomSourceFormat.lx,
+      format: isCeru
+          ? CustomSourceFormat.ceru
+          : (isMusicFree
+              ? CustomSourceFormat.musicfree
+              : CustomSourceFormat.lx),
       version: meta.version ?? '',
       author: meta.author ?? '',
       description: meta.description ?? '',
@@ -389,6 +423,10 @@ class CustomSourceManager extends ChangeNotifier {
     if (script.isCeru || detectCeruFormat(script.code)) {
       return _probeCeru(script);
     }
+    if (script.format == CustomSourceFormat.musicfree ||
+        detectMusicFreeFormat(script.code)) {
+      return _probeMusicFree(script);
+    }
     final runtime = LxRuntime(debugTag: script.name);
     try {
       final result = await runtime.load(script.code);
@@ -400,6 +438,42 @@ class CustomSourceManager extends ChangeNotifier {
       final message = error is LxRuntimeException ? error.message : '$error';
       _appendLog('【${script.name}】加载失败：$message');
       return script.copyWith(sources: const {}, loadError: message);
+    }
+  }
+
+  /// 加载 MusicFree 插件（CommonJS 模块）。
+  Future<CustomSourceScript> _probeMusicFree(CustomSourceScript script) async {
+    MusicFreeRuntime? runtime;
+    try {
+      await _ensureMusicFreeAssets();
+      runtime = MusicFreeRuntime(debugTag: script.name);
+      final info = await runtime.load(
+        pluginCode: script.code,
+        shimJs: _musicFreeShimJs!,
+      );
+      _musicFreeRuntimes.remove(script.id)?.dispose();
+      _musicFreeRuntimes[script.id] = runtime;
+      final decl = LxSourceDecl(
+        key: info.platformKey,
+        name: info.label,
+        actions: const ['musicUrl'],
+        qualitys: const ['128k', '320k', 'flac'],
+      );
+      _appendLog('【${script.name}】MusicFree 插件就绪：${info.label}');
+      return script.copyWith(
+        sources: {info.platformKey: decl},
+        clearLoadError: true,
+        format: CustomSourceFormat.musicfree,
+      );
+    } catch (error) {
+      runtime?.dispose();
+      final message = error is LxRuntimeException ? error.message : '$error';
+      _appendLog('【${script.name}】MusicFree 加载失败：$message');
+      return script.copyWith(
+        sources: const {},
+        loadError: message,
+        format: CustomSourceFormat.musicfree,
+      );
     }
   }
 
@@ -554,6 +628,7 @@ class CustomSourceManager extends ChangeNotifier {
   void _disposeRuntime(String id) {
     _runtimes.remove(id)?.dispose();
     _ceruRuntimes.remove(id)?.dispose();
+    _musicFreeRuntimes.remove(id)?.dispose();
   }
 
   void _disposeCeruRuntime(String id) {
@@ -645,6 +720,8 @@ class CustomSourceManager extends ChangeNotifier {
         final String? url;
         if (script.isCeru) {
           url = await _resolveCeruUrl(script, song, platform, quality);
+        } else if (script.format == CustomSourceFormat.musicfree) {
+          url = await _resolveMusicFreeUrl(script, song, quality);
         } else {
           final runtime = await _runtimeFor(script);
           url = await runtime.fetchMusicUrl(
@@ -676,6 +753,35 @@ class CustomSourceManager extends ChangeNotifier {
 
     throw LxRuntimeException(
       lastError?.toString() ?? '没有脚本支持 ${lxSourceLabels[platform] ?? platform} 音源',
+    );
+  }
+
+  /// MusicFree 插件按原始条目解析，播放列表里的歌只能用 id 拼一个最小条目。
+  Future<String?> _resolveMusicFreeUrl(
+    CustomSourceScript script,
+    Song song,
+    String quality,
+  ) async {
+    var runtime = _musicFreeRuntimes[script.id];
+    if (runtime == null) {
+      final probed = await _probeMusicFree(script);
+      if (probed.loadError != null) {
+        throw LxRuntimeException(probed.loadError!);
+      }
+      runtime = _musicFreeRuntimes[script.id];
+    }
+    if (runtime == null) throw LxRuntimeException('插件未就绪');
+    return runtime.mediaSourceById(
+      song.id,
+      quality,
+      fallback: {
+        'id': song.id,
+        '_songId': song.id,
+        'title': song.title,
+        'artist': song.artist,
+        'album': song.albumName ?? '',
+        'duration': song.duration?.inSeconds ?? 0,
+      },
     );
   }
 

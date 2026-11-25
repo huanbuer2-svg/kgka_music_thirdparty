@@ -362,6 +362,7 @@ class _HistorySongRow extends StatelessWidget {
                     showSongActionSheet(
                       context: context,
                       song: song,
+                      downloads: player.downloadController,
                       actions: [
                         SongSheetAction(
                           icon: Icons.queue_music_rounded,

@@ -141,6 +141,7 @@ class _AboutPageState extends State<AboutPage> {
                   children: [
                     const _InfoRow(label: '应用名称', value: AppConfig.appName),
                     _InfoRow(label: '当前版本', value: AppConfig.appVersion),
+                    _InfoRow(label: '包名', value: AppConfig.appPackageName),
                     const _InfoRow(label: '作者', value: '贰悦'),
                     _InfoRow(
                       label: '服务地址',

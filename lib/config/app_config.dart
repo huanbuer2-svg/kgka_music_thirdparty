@@ -9,8 +9,9 @@ class AppConfig {
   ///
   /// 以前这里是写死的 `'3.3.0'`，跟 pubspec 完全脱钩，导致关于页永远显示
   /// 旧版本号、误导排查。改成运行时读取后，任何平台的包都显示真实版本。
-  static String appVersion = '3.10.0';
+  static String appVersion = '3.11.0';
   static String appVersionCode = '1';
+  static String appPackageName = 'com.eryue.music';
 
   static bool _packageInfoLoaded = false;
 
@@ -22,6 +23,7 @@ class AppConfig {
       final info = await PackageInfo.fromPlatform();
       if (info.version.isNotEmpty) appVersion = info.version;
       if (info.buildNumber.isNotEmpty) appVersionCode = info.buildNumber;
+      if (info.packageName.isNotEmpty) appPackageName = info.packageName;
     } catch (_) {
       // 桌面调试或插件不可用时忽略
     }

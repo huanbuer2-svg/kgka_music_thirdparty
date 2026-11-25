@@ -79,7 +79,12 @@ const Map<String, String> lxSourceLabels = {
 /// - [lx]：lx-music 传统单文件脚本，执行后靠 `send(inited)` 上报音源
 /// - [ceru]：manifestVersion 3 的模块化插件包，执行后导出 `activate(ctx)`，
 ///   平台能力通过 `ctx.providers.register()` 注册
-enum CustomSourceFormat { lx, ceru }
+enum CustomSourceFormat {
+  lx,
+  ceru,
+  /// MusicFree 插件：CommonJS 模块，导出 search / getMediaSource
+  musicfree,
+}
 
 class CustomSourceScript {
   CustomSourceScript({
