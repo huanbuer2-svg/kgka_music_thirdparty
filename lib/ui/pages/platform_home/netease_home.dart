@@ -86,6 +86,61 @@ class NeteaseHomeApi {
     return playlists;
   }
 
+  /// 每日推荐（/recommend/songs 的 dailySongs，30 首）。
+  Future<List<Song>> dailySongs() async {
+    final uri = Uri.parse('$_base/recommend/songs');
+    final response = await _http
+        .get(uri, headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    final decoded = _decode(response);
+    final data = decoded['data'];
+    if (data is! Map) return const [];
+    final list = data['dailySongs'];
+    if (list is! List) return const [];
+    return _songsFromList(list);
+  }
+
+  List<Song> _songsFromList(List<dynamic> list) {
+    final songs = <Song>[];
+    for (final item in list) {
+      if (item is! Map) continue;
+      final idValue = item['id'];
+      if (idValue == null) continue;
+      final artists = item['ar'] ?? item['artists'];
+      final artist = artists is List
+          ? artists
+              .whereType<Map>()
+              .map((entry) => '${entry['name'] ?? ''}')
+              .where((name) => name.isNotEmpty)
+              .join(' / ')
+          : '';
+      final album = item['al'] ?? item['album'];
+      var durationMs = 0;
+      if (item['dt'] != null) {
+        durationMs = (item['dt'] as num).toInt();
+      } else if (item['duration'] != null) {
+        durationMs = (item['duration'] as num).toInt();
+      }
+      songs.add(
+        Song(
+          id: '$idValue',
+          title: '${item['name'] ?? '未知歌曲'}',
+          artist: artist.isEmpty ? '未知艺人' : artist,
+          hash: '',
+          albumName: album is Map ? '${album['name'] ?? ''}' : null,
+          coverUrl: album is Map && album['picUrl'] is String
+              ? album['picUrl'] as String
+              : null,
+          duration: durationMs > 0
+              ? Duration(milliseconds: durationMs)
+              : null,
+          source: SongSource.netease,
+        ),
+      );
+    }
+    return songs;
+  }
+
   /// 榜单/歌单里的曲目。
   Future<List<Song>> playlistTracks(String id) async {
     final uri = Uri.parse('$_base/playlist/detail')
@@ -199,6 +254,7 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
   List<NeteaseRankBrief> _ranks = const [];
   List<NeteasePlaylistBrief> _playlists = const [];
   List<Song> _hotSongs = const [];
+  List<Song> _dailySongs = const [];
   bool _loading = true;
   String? _error;
 
@@ -218,9 +274,11 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
       final results = await Future.wait([
         api.topLists(limit: 6),
         api.recommended(limit: 6),
+        api.dailySongs(),
       ]);
       final ranks = results[0] as List<NeteaseRankBrief>;
       final playlists = results[1] as List<NeteasePlaylistBrief>;
+      final daily = results[2] as List<Song>;
       final hot = ranks.isEmpty
           ? <Song>[]
           : await api.playlistTracks(ranks.first.id);
@@ -228,6 +286,7 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
       setState(() {
         _ranks = ranks;
         _playlists = playlists;
+        _dailySongs = daily;
         _hotSongs = hot;
         _loading = false;
       });
@@ -291,6 +350,16 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
               ),
             ),
           const SizedBox(height: 18),
+          if (_dailySongs.isNotEmpty) ...[
+            _DailyCard(
+              songs: _dailySongs,
+              onPlay: () => widget.player.playSong(
+                _dailySongs.first,
+                queue: _dailySongs,
+              ),
+            ),
+            const SizedBox(height: 22),
+          ],
           _sectionTitle(context, '推荐歌单', Icons.queue_music_rounded),
           const SizedBox(height: 12),
           SizedBox(
@@ -415,6 +484,93 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 每日推荐大卡片（对齐原生 App 的入口样式）。
+class _DailyCard extends StatelessWidget {
+  const _DailyCard({required this.songs, required this.onPlay});
+
+  final List<Song> songs;
+  final VoidCallback onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final cover = songs.first.coverUrl;
+    return GestureDetector(
+      onTap: onPlay,
+      child: Container(
+        height: 132,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          color: scheme.primaryContainer.withValues(alpha: 0.55),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (cover != null && cover.isNotEmpty)
+              Artwork(url: cover, size: double.infinity)
+            else
+              Container(color: scheme.primary.withValues(alpha: 0.3)),
+            // 底部渐变压暗，保证文字可读
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.55),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '每日推荐',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '根据你的口味生成 · ${songs.length} 首',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              right: 14,
+              bottom: 16,
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.play_arrow_rounded,
+                    size: 26, color: scheme.primary),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
