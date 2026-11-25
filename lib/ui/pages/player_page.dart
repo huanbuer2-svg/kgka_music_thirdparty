@@ -697,6 +697,7 @@ class _LandscapeHeader extends StatelessWidget {
     showSongActionSheet(
       context: context,
       song: song,
+      downloads: player.downloadController,
       actions: [
         SongSheetAction(
           icon: Icons.speed_rounded,
@@ -1401,6 +1402,7 @@ class _TopBar extends StatelessWidget {
     showSongActionSheet(
       context: context,
       song: song,
+      downloads: player.downloadController,
       actions: [
         // Grid actions
         SongSheetAction(
