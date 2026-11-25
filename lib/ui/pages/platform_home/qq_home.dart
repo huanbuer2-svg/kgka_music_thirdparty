@@ -9,6 +9,7 @@ import '../../../controllers/player_controller.dart';
 import '../../../models/music_models.dart';
 import '../../design_tokens.dart';
 import '../../widgets/artwork.dart';
+import '../../widgets/platform_home_header.dart';
 import '../../widgets/song_action_sheets.dart';
 import '../../widgets/song_artwork.dart';
 
@@ -238,47 +239,14 @@ class _QqHomeViewState extends State<QqHomeView> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 140),
+        padding: EdgeInsets.fromLTRB(
+          18, MediaQuery.paddingOf(context).top + 10, 18, 140),
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      () {
-                        final hour = DateTime.now().hour;
-                        if (hour < 6) return '夜深了';
-                        if (hour < 12) return '早上好';
-                        if (hour < 18) return '下午好';
-                        return '晚上好';
-                      }(),
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'QQ音乐 · 巅峰榜',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (widget.onSwitchPlatform != null)
-                IconButton(
-                  tooltip: '切换平台',
-                  onPressed: widget.onSwitchPlatform,
-                  icon: const Icon(Icons.swap_horiz_rounded),
-                ),
-            ],
+          PlatformHomeHeader(
+            platformKey: 'qq',
+            auth: widget.auth,
+            subtitle: 'QQ音乐 · 巅峰榜',
+            onSwitchPlatform: widget.onSwitchPlatform,
           ),
           if (_error != null)
             Padding(

@@ -9,6 +9,7 @@ import '../../../controllers/player_controller.dart';
 import '../../../models/music_models.dart';
 import '../../design_tokens.dart';
 import '../../widgets/artwork.dart';
+import '../../widgets/platform_home_header.dart';
 import '../../widgets/song_action_sheets.dart';
 import '../../widgets/song_artwork.dart';
 
@@ -320,19 +321,14 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 140),
+        padding: EdgeInsets.fromLTRB(
+          18, MediaQuery.paddingOf(context).top + 10, 18, 140),
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _greeting(context)),
-              if (widget.onSwitchPlatform != null)
-                IconButton(
-                  tooltip: '切换平台',
-                  onPressed: widget.onSwitchPlatform,
-                  icon: const Icon(Icons.swap_horiz_rounded),
-                ),
-            ],
+          PlatformHomeHeader(
+            platformKey: 'netease',
+            auth: widget.auth,
+            subtitle: '网易云 · 推荐与榜单',
+            onSwitchPlatform: widget.onSwitchPlatform,
           ),
           if (_error != null)
             Padding(
@@ -437,37 +433,6 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
               ),
         ],
       ),
-    );
-  }
-
-  Widget _greeting(BuildContext context) {
-    final hour = DateTime.now().hour;
-    final text = hour < 6
-        ? '夜深了'
-        : hour < 12
-            ? '早上好'
-            : hour < 18
-                ? '下午好'
-                : '晚上好';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          text,
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.5,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '网易云 · 推荐与榜单',
-          style: TextStyle(
-            fontSize: 12.5,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
     );
   }
 
