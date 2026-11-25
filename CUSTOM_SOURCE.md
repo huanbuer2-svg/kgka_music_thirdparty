@@ -191,7 +191,7 @@ manifest 的 `entry.share.configKeys` 会声明 `apiUrl` / `apiKey`。
 | 酷狗 | 官方接口（原有） | 每日推荐 / 推荐歌单 / 排行榜 |
 | 汽水 | `api.qishui.com/luna/pc/charts/{id}` | 4 个官方榜 + 热歌榜实时列表 |
 | 网易云 | `wyy.music.api.hoilai.cn` | 推荐歌单 + 65 个榜单（取前 6）+ 热歌榜 |
-| QQ | 榜单接口只返回 `songId`，播放需要 `songmid` | 待补一次 id 转换再做 |
+| QQ | `musicu.fcg` 巅峰榜 + `pf_song_detail_svr` 补 songmid | 6 个巅峰榜 + 热歌榜 |
 
 汽水的榜单详情接口实测可用（50 首/榜），不需要抖音签名，也不用装插件。
 

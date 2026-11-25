@@ -20,6 +20,7 @@ import '../../services/music_api.dart';
 import '../../services/platform_preference.dart';
 import '../widgets/platform_switcher.dart';
 import 'platform_home/netease_home.dart';
+import 'platform_home/qq_home.dart';
 import 'platform_home/qishui_home.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
@@ -634,6 +635,12 @@ class _HomePageState extends State<HomePage> {
           );
         case 'netease':
           return NeteaseHomeView(
+            player: widget.player,
+            auth: widget.auth,
+            onSwitchPlatform: _openSettings,
+          );
+        case 'qq':
+          return QqHomeView(
             player: widget.player,
             auth: widget.auth,
             onSwitchPlatform: _openSettings,
