@@ -869,12 +869,34 @@ class PlayerController extends ChangeNotifier {
         debugPrint(
           '[KA Music][playback] request=$requestSerial source-load begin',
         );
-        await _audioHandler.loadSong(
-          song: song,
-          url: url,
-          queueSongs: this.queue,
-          queueIndex: currentIndex,
-        );
+        // 换歌前先清掉播放器里的旧音源：只 pause 会让播放器停在 paused 状态，
+        // 后续 setUrl 有时不生效（表现为进度 00:00、按钮却是播放中）。
+        try {
+          await _audioHandler.pause();
+          await _audioHandler.stop();
+        } catch (error) {
+          debugPrint('[KA Music][playback] 清理旧音源失败：$error');
+        }
+        if (requestSerial != _playRequestSerial) return;
+        // 关键：必须带超时。iOS 上 setUrl 加载异常时会一直挂着不返回，
+        // 而切歌是串行的（_serializeSourceChange 等上一个完成），
+        // 一个请求卡住会把后面所有请求全部堵死——表现为「加载极慢 / 点了不播」。
+        await _audioHandler
+            .loadSong(
+              song: song,
+              url: url,
+              queueSongs: this.queue,
+              queueIndex: currentIndex,
+            )
+            .timeout(
+              const Duration(seconds: 12),
+              onTimeout: () {
+                debugPrint(
+                  '[KA Music][playback] request=$requestSerial 加载超时，放弃该音源',
+                );
+                throw TimeoutException('音频加载超时（12s），已放弃这次切换');
+              },
+            );
         if (requestSerial != _playRequestSerial) return;
         debugPrint(
           '[KA Music][playback] request=$requestSerial source-loaded '
