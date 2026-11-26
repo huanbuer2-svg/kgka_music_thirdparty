@@ -631,12 +631,14 @@ class _HomePageState extends State<HomePage> {
             player: widget.player,
             auth: widget.auth,
             onSwitchPlatform: _openSettings,
+            onOpenProfile: () => widget.onTabSwitch?.call(0),
           );
         case 'qq':
           return QqHomeView(
             player: widget.player,
             auth: widget.auth,
             onSwitchPlatform: _openSettings,
+            onOpenProfile: () => widget.onTabSwitch?.call(0),
           );
       }
     }

@@ -185,11 +185,15 @@ class QqHomeView extends StatefulWidget {
     required this.player,
     required this.auth,
     this.onSwitchPlatform,
+    this.onOpenProfile,
   });
 
   final PlayerController player;
   final AuthController auth;
   final VoidCallback? onSwitchPlatform;
+
+  /// 右上角头像：进入「我的」。
+  final VoidCallback? onOpenProfile;
 
   @override
   State<QqHomeView> createState() => _QqHomeViewState();
@@ -247,6 +251,7 @@ class _QqHomeViewState extends State<QqHomeView> {
             auth: widget.auth,
             subtitle: 'QQ音乐 · 巅峰榜',
             onSwitchPlatform: widget.onSwitchPlatform,
+            onTapAvatar: widget.onOpenProfile,
           ),
           if (_error != null)
             Padding(

@@ -241,11 +241,15 @@ class NeteaseHomeView extends StatefulWidget {
     required this.player,
     required this.auth,
     this.onSwitchPlatform,
+    this.onOpenProfile,
   });
 
   final PlayerController player;
   final AuthController auth;
   final VoidCallback? onSwitchPlatform;
+
+  /// 右上角头像：进入「我的」。
+  final VoidCallback? onOpenProfile;
 
   @override
   State<NeteaseHomeView> createState() => _NeteaseHomeViewState();
@@ -329,6 +333,7 @@ class _NeteaseHomeViewState extends State<NeteaseHomeView> {
             auth: widget.auth,
             subtitle: '网易云 · 推荐与榜单',
             onSwitchPlatform: widget.onSwitchPlatform,
+            onTapAvatar: widget.onOpenProfile,
           ),
           if (_error != null)
             Padding(

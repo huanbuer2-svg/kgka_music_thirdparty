@@ -17,6 +17,7 @@ import '../widgets/artwork.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import 'home_page.dart';
+import 'playlist_hub_page.dart';
 import 'library_page.dart';
 import 'player_page.dart';
 import 'rank_page.dart';
@@ -180,12 +181,14 @@ class _AppShellState extends State<AppShell>
   }
 
   int _getPortraitIndex() {
-    return _index == 0 ? 1 : 0;
+    if (_index == 0) return 1; // 我的
+    if (_index == 3) return 2; // 歌单
+    return 0; // 首页
   }
 
   void _setPortraitIndex(int index) {
     setState(() {
-      _index = index == 0 ? _lastHomeTab : 0;
+      _index = index == 1 ? 0 : (index == 2 ? 3 : _lastHomeTab);
     });
   }
 
@@ -281,8 +284,18 @@ class _AppShellState extends State<AppShell>
                             localMusic: widget.localMusic,
                           );
 
-                          final pages = [homePage, libraryPage];
-                          final activePageIndex = _index == 0 ? 1 : 0;
+                          final hubPage = PlaylistHubPage(
+                            api: widget.api,
+                            auth: widget.auth,
+                            player: widget.player,
+                            downloads: widget.downloads,
+                            onOpenProfile: () =>
+                                setState(() => _index = 0),
+                          );
+
+                          final pages = [homePage, libraryPage, hubPage];
+                          final activePageIndex =
+                              _index == 0 ? 1 : (_index == 3 ? 2 : 0);
 
                           return Scaffold(
                             body: Column(
@@ -342,7 +355,15 @@ class _AppShellState extends State<AppShell>
       localMusic: widget.localMusic,
     );
 
-    final pages = [homePage, libraryPage];
+    final hubPage = PlaylistHubPage(
+      api: widget.api,
+      auth: widget.auth,
+      player: widget.player,
+      downloads: widget.downloads,
+      onOpenProfile: () => setState(() => _index = 0),
+    );
+
+    final pages = [homePage, libraryPage, hubPage];
 
     Widget mainContent = Stack(
       children: [
@@ -393,6 +414,11 @@ class _AppShellState extends State<AppShell>
                 label: Text('首页'),
               ),
               NavigationRailDestination(
+                icon: Icon(Icons.library_music_outlined),
+                selectedIcon: Icon(Icons.library_music_rounded),
+                label: Text('歌单'),
+              ),
+              NavigationRailDestination(
                 icon: Icon(Icons.person_outline_rounded),
                 selectedIcon: Icon(Icons.person_rounded),
                 label: Text('我的'),
@@ -433,7 +459,7 @@ class _AppShellState extends State<AppShell>
   }
 
   Widget _buildCarTopNavBar(BuildContext context, ColorScheme colorScheme) {
-    final tabs = ['我的', '推荐', '电台'];
+    final tabs = ['我的', '推荐', '电台', '歌单'];
     final topInset = MediaQuery.paddingOf(context).top;
     return Container(
       // 顶部加上状态栏高度，避免导航栏内容被状态栏遮挡
