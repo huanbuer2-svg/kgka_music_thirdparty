@@ -869,15 +869,6 @@ class PlayerController extends ChangeNotifier {
         debugPrint(
           '[KA Music][playback] request=$requestSerial source-load begin',
         );
-        // 换歌前先清掉播放器里的旧音源：只 pause 会让播放器停在 paused 状态，
-        // 后续 setUrl 有时不生效（表现为进度 00:00、按钮却是播放中）。
-        try {
-          await _audioHandler.pause();
-          await _audioHandler.stop();
-        } catch (error) {
-          debugPrint('[KA Music][playback] 清理旧音源失败：$error');
-        }
-        if (requestSerial != _playRequestSerial) return;
         // 关键：必须带超时。iOS 上 setUrl 加载异常时会一直挂着不返回，
         // 而切歌是串行的（_serializeSourceChange 等上一个完成），
         // 一个请求卡住会把后面所有请求全部堵死——表现为「加载极慢 / 点了不播」。
@@ -933,6 +924,13 @@ class PlayerController extends ChangeNotifier {
       debugPrint('[KA Music][playback] request=$requestSerial failed: $error');
       errorMessage = error.toString();
       unawaited(_audioHandler.pause());
+      // 失败时把旧音源清掉，否则播放器里还挂着上一首，用户再点播放听到的是旧歌。
+      // 必须 catchError：iOS 上 stop 偶发抛错，未捕获会直接崩（上一版就是这么回归的）。
+      unawaited(
+        _audioHandler.stop().catchError((Object error) {
+          debugPrint('[KA Music][playback] 清理旧音源失败：$error');
+        }),
+      );
       if (wasPlaying) {
         unawaited(audioPlayer.setVolume(_userVolume));
       }
