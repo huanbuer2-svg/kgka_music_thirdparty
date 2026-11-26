@@ -16,6 +16,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/artwork.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
+import '../widgets/toast.dart';
 import 'home_page.dart';
 import 'library_page.dart';
 import 'player_page.dart';
@@ -76,6 +77,11 @@ class _AppShellState extends State<AppShell>
   }
 
   void _openPlayer() {
+    // 还没有任何歌曲时打开播放页只会得到一张空白页，这里直接拦住
+    if (widget.player.currentSong == null) {
+      Toast.info('还没有播放中的歌曲');
+      return;
+    }
     setState(() => _playerVisible = true);
     _playerController.forward(from: 0);
   }

@@ -910,10 +910,7 @@ class PlayerController extends ChangeNotifier {
       if (requestSerial != _playRequestSerial) return;
       debugPrint('[KA Music][playback] request=$requestSerial failed: $error');
       errorMessage = error.toString();
-      // 只 pause 不清音源的话，播放器里留着的还是上一首：
-      // 用户再点播放听到的就是旧歌（安卓上尤其明显，iOS 失败率低所以少见）。
       unawaited(_audioHandler.pause());
-      unawaited(_audioHandler.stop());
       if (wasPlaying) {
         unawaited(audioPlayer.setVolume(_userVolume));
       }

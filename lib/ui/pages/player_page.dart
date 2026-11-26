@@ -113,7 +113,36 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget build(BuildContext context) {
     final song = _currentSong;
     if (song == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      // 兜底：没有任何歌曲时不要给一张纯白页，给个能退出的占位
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.music_off_rounded,
+                  size: 46,
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '还没有播放中的歌曲',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                OutlinedButton(
+                  onPressed: widget.onClose ?? () => Navigator.of(context).maybePop(),
+                  child: const Text('返回'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     return _PlayerBody(
