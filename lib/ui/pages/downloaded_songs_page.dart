@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../controllers/auth_controller.dart';
@@ -298,6 +299,15 @@ class _DownloadedSongRow extends StatelessWidget {
             ),
             if (filePath != null && filePath.isNotEmpty) ...[
               ListTile(
+                leading: const Icon(Icons.ios_share_rounded),
+                title: const Text('导出到「文件」'),
+                subtitle: const Text('存到文件 App，或发给微信 / 隔空投送'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _exportFile(context, filePath, song);
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.folder_open_rounded),
                 title: const Text('打开文件夹'),
                 onTap: () {
@@ -329,6 +339,34 @@ class _DownloadedSongRow extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 导出下载好的文件。
+  ///
+  /// iOS 沙盒里的文件在「文件」App 看不到，只能走系统分享面板
+  /// （里面有「存储到文件」），这是唯一能让用户拿到文件的途径。
+  Future<void> _exportFile(
+    BuildContext context,
+    String path,
+    Song song,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('文件不存在，可能已被清理')),
+        );
+        return;
+      }
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(path)], subject: song.title),
+      );
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('导出失败：$error')),
+      );
+    }
   }
 
   Future<void> _openContainingFolder(String filePath) async {

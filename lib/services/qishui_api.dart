@@ -220,23 +220,36 @@ class QishuiApi {
     }
   }
 
-  /// 跟随一次重定向，返回最终可直连的地址；失败时返回 null 由调用方兜底。
+  /// 跟随重定向拿最终地址。
+  ///
+  /// 注意不能用 `response.request.url` —— 那是**发起时的原始 URL**，
+  /// 不是重定向后的目标（上一版就栽在这）。这里关掉自动重定向，
+  /// 手动读 `Location` 逐跳解析，最多 3 跳。
   Future<String?> _resolveRedirect(String url) async {
+    var current = url;
+    final client = _client ??= http.Client();
     try {
-      final request = http.Request('GET', Uri.parse(url));
-      // 只要 1 字节，避免把整首歌拉下来
-      request.headers['Range'] = 'bytes=0-0';
-      final client = _client ??= http.Client();
-      final response = await client
-          .send(request)
-          .timeout(const Duration(seconds: 12));
-      final finalUrl = response.request?.url.toString();
-      // 及时断流
-      unawaited(response.stream.drain<void>().catchError((_) {}));
-      if (finalUrl != null && finalUrl.isNotEmpty && finalUrl != url) {
-        return finalUrl;
+      for (var hop = 0; hop < 3; hop++) {
+        final request = http.Request('GET', Uri.parse(current))
+          ..followRedirects = false
+          ..headers['Range'] = 'bytes=0-0';
+        final response = await client
+            .send(request)
+            .timeout(const Duration(seconds: 12));
+        // 立刻断开，别把音频拉下来
+        unawaited(response.stream.drain<void>().catchError((_) {}));
+
+        final location = response.headers['location'];
+        if (location == null || location.trim().isEmpty) {
+          // 不再跳转：current 就是可直连的最终地址
+          return hop == 0 ? null : current;
+        }
+        // Location 可能是相对路径
+        current = Uri.parse(current).resolve(location.trim()).toString();
+        debugPrint('[KA Music][qishui] 重定向 ${hop + 1} → '
+            '${Uri.parse(current).host}');
       }
-      return null;
+      return current;
     } catch (error) {
       debugPrint('[KA Music][qishui] 跟随重定向失败：$error');
       return null;

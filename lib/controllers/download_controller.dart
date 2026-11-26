@@ -358,6 +358,15 @@ class DownloadController extends ChangeNotifier {
 
   DownloadEntry? entryFor(Song song) => _downloads[_downloadKey(song)];
 
+  /// 某首歌已下载文件的绝对路径（没下载过或还在下载中返回 null）。
+  String? filePathOf(Song song) {
+    final entry = _downloads[song.hash];
+    if (entry == null) return null;
+    final path = entry.filePath;
+    if (path == null || path.isEmpty) return null;
+    return path;
+  }
+
   List<Song> get downloadedSongs => _downloads.values
       .where((e) => e.status == DownloadStatus.downloaded)
       .map((e) => e.song)
