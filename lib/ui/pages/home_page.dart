@@ -21,7 +21,6 @@ import '../../services/platform_preference.dart';
 import '../widgets/platform_switcher.dart';
 import 'platform_home/netease_home.dart';
 import 'platform_home/qq_home.dart';
-import 'platform_home/qishui_home.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
 import '../widgets/now_playing_badge.dart';
@@ -627,12 +626,6 @@ class _HomePageState extends State<HomePage> {
     // 非酷狗平台走各自的首页（数据源、接口都不同）
     if (!isCarMode) {
       switch (PlatformPreference.instance.platform) {
-        case 'qishui':
-          return QishuiHomeView(
-            player: widget.player,
-            auth: widget.auth,
-            onSwitchPlatform: _openSettings,
-          );
         case 'netease':
           return NeteaseHomeView(
             player: widget.player,

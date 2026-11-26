@@ -38,9 +38,9 @@ class BuiltinCustomSource {
 /// 内置音源清单。只收录经过宿主自检（`tool/lx_host_check.cjs`）验证能跑通的脚本。
 const List<BuiltinCustomSource> kBuiltinCustomSources = [
   BuiltinCustomSource(
-    id: 'xinglan',
-    asset: 'lib/assets/custom_sources/xinglan.js',
-    displayName: '星澜音乐源',
+    id: 'linglan',
+    asset: 'lib/assets/custom_sources/linglan.js',
+    displayName: '聆澜音源',
   ),
 ];
 

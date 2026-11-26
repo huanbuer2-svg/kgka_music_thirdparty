@@ -143,6 +143,25 @@ iOS 的 ATS 与 macOS 沙盒网络权限已在本次改动里补上。
 
 已实测的插件：`星海音乐源 - 汽水音乐 (qs) v1.3.0` —— 搜索、取播放地址、榜单都正常。
 
+## 内置音源
+
+`kBuiltinCustomSources` 里的脚本会在首次启动时自动安装：
+
+| id | 文件 | 平台 |
+|---|---|---|
+| `linglan` | `lib/assets/custom_sources/linglan.js` | kg / kw / mg / qs / tx / wy |
+
+自检：`node tool/lx_host_check.cjs lib/assets/custom_sources/linglan.js`
+
+### 关于汽水（qs）
+
+内置的汽水直连已移除。原因：抖音接口需要签名，第三方聚合后端返回的
+`source_url` 会 302 到一个防盗链中转域名，iOS 播放器处理不好；
+改用聆澜音源后，它的服务端对 qs 也返回
+`汽水音乐未返回可直接播放的音质（缺失、过期或加密）`（所有档位 500）。
+
+结论：**汽水目前没有可靠链路**，要等上游解决。
+
 ## ceru 插件（manifestVersion 3）
 
 除了 lx 传统单文件脚本，现在还支持 **ceru-js@1** 的模块化插件包
@@ -181,36 +200,6 @@ manifest 的 `entry.share.configKeys` 会声明 `apiUrl` / `apiKey`。
 （记在 `removedBuiltins` 里）。
 
 内置前会用 `tool/lx_host_check.cjs` 过一遍宿主自检，跑不通的脚本不会进包。
-
-## 首页按平台切换
-
-首页右上角的平台切换现在会**换掉整个首页内容**：
-
-| 平台 | 首页数据源 | 内容 |
-|---|---|---|
-| 酷狗 | 官方接口（原有） | 每日推荐 / 推荐歌单 / 排行榜 |
-| 汽水 | `api.qishui.com/luna/pc/charts/{id}` | 4 个官方榜 + 热歌榜实时列表 |
-| 网易云 | `wyy.music.api.hoilai.cn` | 推荐歌单 + 65 个榜单（取前 6）+ 热歌榜 |
-| QQ | `musicu.fcg` 巅峰榜 + `pf_song_detail_svr` 补 songmid | 6 个巅峰榜 + 热歌榜 |
-
-汽水的榜单详情接口实测可用（50 首/榜），不需要抖音签名，也不用装插件。
-
-## 汽水音乐（内置直连，不依赖插件）
-
-汽水官方接口需要抖音的 `x-gorgon` / `msToken` 签名和设备 cookie，
-客户端直连只会拿到 **200 空响应**（实测重试 3 次全空）。
-
-所以这里走第三方聚合后端（星海），它已经替我们完成签名与设备注册：
-
-| 能力 | 接口 |
-|---|---|
-| 搜索 | `GET https://yy1.zddyr.top/lx/api/qs.php?action=search&keywords=&page=` |
-| 播放 | `GET https://yy1.zddyr.top/lx/api/?source=qs&name=&singer=&songmid=&quality=` |
-
-播放返回的 `source_url` 必须拼上 `key` 才能取流，`QishuiApi` 已处理。
-
-搜索页平台切换里有「汽水」，播放时**固定走这条直连**，不会被第三方插件抢走
-（插件对 qs 的直连会被抖音风控拦掉）。
 
 ## 多平台与下载
 

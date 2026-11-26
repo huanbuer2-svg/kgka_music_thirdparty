@@ -17,7 +17,6 @@ class PlatformPreference extends ChangeNotifier {
     'kugou': '酷狗',
     'netease': '网易云',
     'qq': 'QQ音乐',
-    'qishui': '汽水',
   };
 
   String _platform = 'kugou';
@@ -35,8 +34,6 @@ class PlatformPreference extends ChangeNotifier {
         return Icons.cloud_rounded;
       case 'qq':
         return Icons.album_rounded;
-      case 'qishui':
-        return Icons.waves_rounded;
       default:
         return Icons.music_note_rounded;
     }

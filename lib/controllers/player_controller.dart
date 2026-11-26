@@ -19,7 +19,6 @@ import '../services/cover_service.dart';
 import '../services/custom_source/custom_source_manager.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/music_api.dart';
-import '../services/qishui_api.dart';
 import '../services/local_lyrics_service.dart';
 import '../services/music_audio_handler.dart';
 import '../services/bluetooth_lyrics_service.dart';
@@ -1055,10 +1054,8 @@ class PlayerController extends ChangeNotifier {
   Future<PlayUrl> _resolvePlayUrl(Song song) async {
     final custom = CustomSourceManager.instance;
     // 云盘歌曲是用户自己上传的文件，第三方音源不可能有，直接排除
-    // 汽水固定走内置直连（QishuiApi），第三方插件对 qs 直连会被风控拦截
     final canUseCustom = custom.isActive &&
         !song.isCloudDrive &&
-        song.source != SongSource.qs &&
         CustomSourceManager.platformKeyOf(song) != null;
 
     PlayUrl? primary;
@@ -1184,15 +1181,8 @@ class PlayerController extends ChangeNotifier {
       throw Exception('QQ 音乐歌曲需要第三方音源支持（请先导入支持 QQ 的音源）');
     }
     if (song.source == SongSource.qs) {
-      // 汽水官方接口要抖音签名，这里走聚合后端（见 QishuiApi）
-      final url = await QishuiApi.instance.resolveUrl(
-        song,
-        quality: effectiveAudioQuality.apiValue,
-      );
-      if (url == null || url.isEmpty) {
-        throw Exception('汽水音乐暂时没有可播放地址');
-      }
-      return PlayUrl(url: url, hash: song.hash);
+      // 汽水没有公开可用的官方接口，交给第三方音源脚本
+      throw Exception('汽水音乐需要第三方音源支持（请确认音源已启用）');
     }
     if (song.isCloudDrive) {
       return _api.cloudSongUrl(song);
