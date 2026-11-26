@@ -9,7 +9,7 @@ class AppConfig {
   ///
   /// 以前这里是写死的 `'3.3.0'`，跟 pubspec 完全脱钩，导致关于页永远显示
   /// 旧版本号、误导排查。改成运行时读取后，任何平台的包都显示真实版本。
-  static String appVersion = '3.20.0';
+  static String appVersion = '3.20.1';
   static String appVersionCode = '1';
   static String appPackageName = 'com.eryue.music';
 
