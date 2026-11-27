@@ -209,7 +209,10 @@ class _SearchPageState extends State<SearchPage> {
     });
     try {
       if (type == _SearchType.playlist) {
-        final playlists = await widget.api.searchPlaylists(keywords);
+        final playlists = await widget.api.searchPlaylists(
+          keywords,
+          platform: platform.name,
+        );
         if (!_isCurrentSearch(serial, keywords, type, platform)) return;
         setState(() {
           _playlists = playlists;
@@ -746,8 +749,7 @@ class _SearchPageState extends State<SearchPage> {
         if (text.isNotEmpty || _searched) ...[
           _TypeSelector(type: _type, onChanged: _switchType),
           // 专辑搜索目前仅酷狗源支持，歌曲搜索才显示平台切换
-          if (_type == _SearchType.song)
-            _PlatformSelector(platform: _platform, onChanged: _switchPlatform),
+          _PlatformSelector(platform: _platform, onChanged: _switchPlatform),
         ],
         Expanded(child: _buildContent(context, text)),
       ],

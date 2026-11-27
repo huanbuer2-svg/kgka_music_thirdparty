@@ -1282,8 +1282,30 @@ class MusicApi {
         .toList();
   }
 
-  /// 搜索歌单（酷狗官方接口，字段与推荐歌单不同，单独转）。
+  /// 搜索歌单。按平台走不同接口，字段各不相同，各自转换。
   Future<List<PlaylistSummary>> searchPlaylists(
+    String keywords, {
+    String platform = 'kugou',
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    switch (platform) {
+      case 'netease':
+        return _searchPlaylistsNetease(keywords, limit: pageSize);
+      case 'qq':
+        // QQ 的 songlist 需要额外的 grp/search_type 组合，暂未打通
+        return const [];
+      default:
+        return _searchPlaylistsKugou(
+          keywords,
+          page: page,
+          pageSize: pageSize,
+        );
+    }
+  }
+
+  /// 酷狗歌单搜索（官方接口，字段和推荐歌单不一样）。
+  Future<List<PlaylistSummary>> _searchPlaylistsKugou(
     String keywords, {
     int page = 1,
     int pageSize = 20,
@@ -1298,10 +1320,8 @@ class MusicApi {
       },
     );
     final raw = await _client.getRaw(uri);
-    final json = asMap(raw);
-    final data = asMap(json['data']);
-    final list = asList(data['info']);
-    return list
+    final data = asMap(asMap(raw)['data']);
+    return asList(data['info'])
         .whereType<Map<String, dynamic>>()
         .map((item) {
           final id = asString(item['specialid']) ?? '';
@@ -1312,7 +1332,6 @@ class MusicApi {
             coverUrl: normalizeImageUrl(asString(item['imgurl'])),
             songCount: asInt(item['songcount']),
             playCount: asInt(item['playcount']),
-            // 标上来源 ID，避免被当成收藏专辑走错分支
             sourceGlobalId: id,
           );
         })
@@ -1320,7 +1339,40 @@ class MusicApi {
         .toList();
   }
 
-  /// 搜索网易云歌曲。
+  /// 网易云歌单搜索（type=1000）。
+  Future<List<PlaylistSummary>> _searchPlaylistsNetease(
+    String keywords, {
+    int limit = 20,
+  }) async {
+    final uri = Uri.parse('https://wyy.music.api.hoilai.cn/search').replace(
+      queryParameters: {
+        'keywords': keywords,
+        'type': '1000',
+        'limit': '$limit',
+      },
+    );
+    final raw = await _client.getRaw(uri);
+    final result = asMap(asMap(raw)['result']);
+    return asList(result['playlists'])
+        .whereType<Map<String, dynamic>>()
+        .map((item) {
+          final id = asString(item['id']) ?? '';
+          final creator = asMap(item['creator']);
+          return PlaylistSummary(
+            id: id,
+            title: asString(item['name']) ?? '未命名歌单',
+            subtitle: asString(creator['nickname']),
+            coverUrl: normalizeImageUrl(asString(item['coverImgUrl'])),
+            songCount: asInt(item['trackCount']),
+            playCount: asInt(item['playCount']),
+            sourceGlobalId: id,
+          );
+        })
+        .where((playlist) => playlist.id.isNotEmpty)
+        .toList();
+  }
+
+  /// 搜索网易云歌曲。  /// 搜索网易云歌曲。
   ///
   /// 使用独立的网易云 API（`wyy.music.api.hoilai.cn`）：
   /// 1. 调用 `/search?keywords=xxx` 获取歌曲 ID 列表
