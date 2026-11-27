@@ -1430,6 +1430,47 @@ class MusicApi {
     return result;
   }
 
+  /// 网易云歌单里的歌曲（`/playlist/detail` 一次拿全）。
+  ///
+  /// 网易云歌单的 id 也是纯数字，但 `/playlist/detail`（酷狗那套）不认，
+  /// 会返回 20010，所以按平台分开取。
+  Future<List<Song>> neteasePlaylistSongs(String id) async {
+    final uri = Uri.parse(
+      'https://wyy.music.api.hoilai.cn/playlist/detail',
+    ).replace(queryParameters: {'id': id});
+    final raw = await _client.getRaw(uri);
+    final playlist = asMap(asMap(raw)['playlist']);
+    final tracks = asList(playlist['tracks']);
+    final songs = <Song>[];
+    for (final item in tracks) {
+      if (item is! Map) continue;
+      final songId = asString(item['id']);
+      if (songId == null || songId.isEmpty) continue;
+      final artists = asList(item['ar'])
+          .whereType<Map>()
+          .map((a) => asString(a['name']) ?? '')
+          .where((name) => name.isNotEmpty)
+          .join(' / ');
+      final album = asMap(item['al']);
+      final durationMs = asInt(item['dt']);
+      songs.add(
+        Song(
+          id: songId,
+          title: asString(item['name']) ?? '未知歌曲',
+          artist: artists.isEmpty ? '未知艺人' : artists,
+          hash: '',
+          albumName: asString(album['name']),
+          coverUrl: normalizeImageUrl(asString(album['picUrl'])),
+          duration: durationMs == null || durationMs <= 0
+              ? null
+              : Duration(milliseconds: durationMs),
+          source: SongSource.netease,
+        ),
+      );
+    }
+    return songs;
+  }
+
   /// 酷狗歌单里的歌曲（按 specialid 取，不需要 global_collection_id）。
   ///
   /// 搜索接口只给 specialid，而 `/playlist/detail` 要 global_collection_id，

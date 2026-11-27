@@ -393,6 +393,20 @@ class _SearchPageState extends State<SearchPage> {
       );
       return;
     }
+    if (_platform == _SearchPlatform.netease) {
+      // 网易云歌单 id 也是纯数字，通用详情页会拿去当酷狗 id 查（20010）
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => QqPlaylistPage(
+            api: widget.api,
+            player: widget.player,
+            playlist: playlist,
+            loader: widget.api.neteasePlaylistSongs,
+          ),
+        ),
+      );
+      return;
+    }
     if (_platform == _SearchPlatform.kugou) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
