@@ -1492,7 +1492,8 @@ class MusicApi {
       },
     );
     final raw = await _client.getRaw(uri);
-    final data = asMap(asMap(raw)['data']);
+    final outer = asMap(raw);
+    final data = outer['data'] is Map ? asMap(outer['data']) : outer;
     final list = asList(data['info']);
     final songs = <Song>[];
     for (final item in list) {
@@ -1640,7 +1641,10 @@ class MusicApi {
       },
     );
     final raw = await _client.getRaw(uri);
-    final data = asMap(asMap(raw)['data']);
+    // ApiClient 可能已经把 data 解包出来了，这里两种形态都兼容，
+    // 否则列表永远是空的（表现为"没有找到"）
+    final outer = asMap(raw);
+    final data = outer['data'] is Map ? asMap(outer['data']) : outer;
     return asList(data['info'])
         .whereType<Map<String, dynamic>>()
         .map((item) {
@@ -1672,7 +1676,9 @@ class MusicApi {
       },
     );
     final raw = await _client.getRaw(uri);
-    final result = asMap(asMap(raw)['result']);
+    final outer = asMap(raw);
+    final data = outer['data'] is Map ? asMap(outer['data']) : outer;
+    final result = asMap(data['result'] ?? outer['result']);
     return asList(result['playlists'])
         .whereType<Map<String, dynamic>>()
         .map((item) {
