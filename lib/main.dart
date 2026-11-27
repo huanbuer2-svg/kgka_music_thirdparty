@@ -15,6 +15,7 @@ import 'controllers/theme_controller.dart';
 import 'core/api_client.dart';
 import 'services/cache_service.dart';
 import 'services/custom_source/custom_source_manager.dart';
+import 'services/platform_accounts.dart';
 import 'services/platform_preference.dart';
 import 'services/deep_link_service.dart';
 import 'services/device_info_service.dart';
@@ -36,6 +37,8 @@ Future<void> main() async {
   await CustomSourceManager.instance.init();
   await AppConfig.loadPackageInfo();
   await PlatformPreference.instance.init();
+  // 第三方平台账号（Cookie）要在首次搜索前就绪，否则登录态不生效
+  await PlatformAccountStore.instance.ensureLoaded();
 
   final client = ApiClient();
   final api = MusicApi(client);

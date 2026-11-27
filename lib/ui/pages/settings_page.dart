@@ -7,6 +7,7 @@ import '../widgets/status_bar_overlay.dart';
 import '../../config/app_config.dart';
 import '../../models/music_models.dart';
 import '../../controllers/auth_controller.dart';
+import 'accounts_page.dart';
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
@@ -258,6 +259,18 @@ class SettingsPage extends StatelessWidget {
                 const SizedBox(height: 8),
                 _SettingsCard(
                   children: [
+                    _SettingsTile(
+                      icon: Icons.account_circle_rounded,
+                      iconColor: const Color(0xFFE60026),
+                      title: '账号登录',
+                      subtitle: '网易云 / QQ / 哔哩哔哩 等平台账号',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => AccountsPage(auth: auth),
+                        ),
+                      ),
+                    ),
+                    _SettingsDivider(),
                     _SettingsTile(
                       icon: Icons.sync_rounded,
                       iconColor: colorScheme.primary,

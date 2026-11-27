@@ -7,6 +7,7 @@ import '../config/app_config.dart';
 import '../core/api_client.dart';
 import '../models/app_version.dart';
 import '../models/music_models.dart';
+import 'platform_accounts.dart';
 import 'qq_playlist_service.dart';
 
 class MusicApi {
@@ -1293,8 +1294,16 @@ class MusicApi {
       case 'netease':
         return _searchPlaylistsNetease(keywords, limit: pageSize);
       case 'qq':
-        // QQ 没有免登录的关键词歌单搜索（songlist 恒为空），
-        // 用歌单广场的热门列表顶上，点进去能正常打开。
+        // 有登录态（Cookie 里的 qm_keyst）才能拿到关键词搜歌单的结果；
+        // 没有就只能退化成歌单广场的热门列表。
+        if (_qqAuthst() != null) {
+          final hits = await _searchPlaylistsQqKeyword(
+            keywords,
+            page: page,
+            pageSize: pageSize,
+          );
+          if (hits.isNotEmpty) return hits;
+        }
         return _qqSquarePlaylists(limit: pageSize);
       default:
         return _searchPlaylistsKugou(
@@ -1303,6 +1312,56 @@ class MusicApi {
           pageSize: pageSize,
         );
     }
+  }
+
+  /// QQ 登录态里的 `qm_keyst`（来自用户在账号页粘贴的 Cookie）。
+  String? _qqAuthst() {
+    final cookie = PlatformAccountStore.instance.cookieOf(PlatformAccount.qq);
+    if (cookie == null || cookie.isEmpty) return null;
+    final value = PlatformAccountStore.pickCookieValue(cookie, 'qm_keyst');
+    return (value == null || value.isEmpty) ? null : value;
+  }
+
+  /// 带登录态的关键词搜歌单（`songlist`）。
+  Future<List<PlaylistSummary>> _searchPlaylistsQqKeyword(
+    String keywords, {
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final data = await _musicu(
+      module: 'music.search.SearchCgiService',
+      method: 'DoSearchForQQMusicDesktop',
+      param: {
+        'query': keywords,
+        'num_per_page': pageSize,
+        'page_num': page,
+        'search_type': 3,
+        'grp': 1,
+      },
+    );
+    final body = asMap(data['body']);
+    final songlist = asMap(body['songlist']);
+    final list = asList(songlist['list']);
+    final result = <PlaylistSummary>[];
+    for (final item in list) {
+      if (item is! Map) continue;
+      final basic = asMap(asMap(item['Playlist'])['basic']);
+      final tid = asString(basic['tid']);
+      final title = asString(basic['title']);
+      if (tid == null || tid.isEmpty || title == null) continue;
+      final creator = asMap(basic['creator']);
+      final content = asMap(asMap(item['Playlist'])['content']);
+      result.add(
+        PlaylistSummary(
+          id: tid,
+          title: title,
+          subtitle: asString(creator['nick']),
+          songCount: asInt(content['song_cnt']) ?? asInt(basic['song_cnt']),
+          sourceGlobalId: tid,
+        ),
+      );
+    }
+    return result;
   }
 
   /// QQ 歌单广场（热门歌单）。
@@ -1407,8 +1466,13 @@ class MusicApi {
     required String method,
     required Map<String, Object?> param,
   }) async {
+    final authst = _qqAuthst();
     final body = jsonEncode({
-      'comm': {'ct': 24, 'cv': 0},
+      'comm': {
+        'ct': 24,
+        'cv': 0,
+        if (authst != null) 'authst': authst,
+      },
       'req': {'module': module, 'method': method, 'param': param},
     });
     final postResp = await http
