@@ -19,11 +19,16 @@ class QqPlaylistPage extends StatefulWidget {
     required this.api,
     required this.player,
     required this.playlist,
+    this.loader,
   });
 
   final MusicApi api;
   final PlayerController player;
   final PlaylistSummary playlist;
+
+  /// 曲目加载方式。默认走 QQ 的老 web 接口；
+  /// 酷狗搜索来的歌单传 [MusicApi.kugouPlaylistSongs]。
+  final Future<List<Song>> Function(String id)? loader;
 
   @override
   State<QqPlaylistPage> createState() => _QqPlaylistPageState();
@@ -46,7 +51,8 @@ class _QqPlaylistPageState extends State<QqPlaylistPage> {
       _error = null;
     });
     try {
-      final songs = await widget.api.qqPlaylistSongs(widget.playlist.id);
+      final loader = widget.loader ?? widget.api.qqPlaylistSongs;
+      final songs = await loader(widget.playlist.id);
       if (!mounted) return;
       setState(() {
         _songs = songs;

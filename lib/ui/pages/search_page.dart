@@ -379,7 +379,8 @@ class _SearchPageState extends State<SearchPage> {
 
   /// 打开搜索到的歌单。
   void _openPlaylistResult(PlaylistSummary playlist) {
-    // QQ 歌单走老 web 接口，版式与通用详情页不同，单独一个轻量页
+    // QQ / 酷狗搜索来的歌单只带 specialid，通用详情页要 global_collection_id，
+    // 直接查会报 20010，所以走各自的取曲目接口。
     if (_platform == _SearchPlatform.qq) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -387,6 +388,19 @@ class _SearchPageState extends State<SearchPage> {
             api: widget.api,
             player: widget.player,
             playlist: playlist,
+          ),
+        ),
+      );
+      return;
+    }
+    if (_platform == _SearchPlatform.kugou) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => QqPlaylistPage(
+            api: widget.api,
+            player: widget.player,
+            playlist: playlist,
+            loader: widget.api.kugouPlaylistSongs,
           ),
         ),
       );

@@ -1396,6 +1396,62 @@ class MusicApi {
     return result;
   }
 
+  /// 酷狗歌单里的歌曲（按 specialid 取，不需要 global_collection_id）。
+  ///
+  /// 搜索接口只给 specialid，而 `/playlist/detail` 要 global_collection_id，
+  /// 直接拿 specialid 去查会返回 20010「get other list file fail」，
+  /// 所以搜索来的歌单走这个接口。
+  Future<List<Song>> kugouPlaylistSongs(
+    String specialId, {
+    int pageSize = 300,
+  }) async {
+    final uri = Uri.parse(
+      'https://mobiles.kugou.com/api/v3/special/song',
+    ).replace(
+      queryParameters: {
+        'specialid': specialId,
+        'page': '1',
+        'pagesize': '$pageSize',
+        'plat': '0',
+        'version': '8000',
+      },
+    );
+    final raw = await _client.getRaw(uri);
+    final data = asMap(asMap(raw)['data']);
+    final list = asList(data['info']);
+    final songs = <Song>[];
+    for (final item in list) {
+      if (item is! Map) continue;
+      final hash = asString(item['hash']);
+      if (hash == null || hash.isEmpty) continue;
+      // filename 形如 "周杰伦 - 反方向的钟"
+      final filename = asString(item['filename']) ?? '';
+      String title = filename;
+      String artist = '未知艺人';
+      final sep = filename.indexOf(' - ');
+      if (sep > 0) {
+        artist = filename.substring(0, sep).trim();
+        title = filename.substring(sep + 3).trim();
+      }
+      final seconds = asInt(item['duration']);
+      songs.add(
+        Song(
+          id: asString(item['audio_id']) ?? hash,
+          title: title.isEmpty ? '未知歌曲' : title,
+          artist: artist.isEmpty ? '未知艺人' : artist,
+          hash: hash,
+          albumName: null,
+          coverUrl: null,
+          duration: seconds == null || seconds <= 0
+              ? null
+              : Duration(seconds: seconds),
+          source: SongSource.kugou,
+        ),
+      );
+    }
+    return songs;
+  }
+
   /// QQ 歌单里的歌曲（老 web 接口，不需要签名）。
   Future<List<Song>> qqPlaylistSongs(String disstid) async {
     final uri = Uri.parse(
