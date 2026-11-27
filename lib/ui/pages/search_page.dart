@@ -46,7 +46,7 @@ class SearchPage extends StatefulWidget {
 enum _SearchPlatform { kugou, netease, qq }
 
 /// 搜索类型。
-enum _SearchType { song, album }
+enum _SearchType { song, album, playlist }
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
@@ -60,6 +60,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _suggestLoading = false;
   List<Song> _results = const [];
   List<ArtistAlbum> _albums = const [];
+  List<PlaylistSummary> _playlists = const [];
   bool _loading = false;
   bool _searched = false;
 
@@ -207,12 +208,21 @@ class _SearchPageState extends State<SearchPage> {
       _lastSearchedKeyword = keywords;
     });
     try {
-      if (type == _SearchType.album) {
+      if (type == _SearchType.playlist) {
+        final playlists = await widget.api.searchPlaylists(keywords);
+        if (!_isCurrentSearch(serial, keywords, type, platform)) return;
+        setState(() {
+          _playlists = playlists;
+          _results = const [];
+          _albums = const [];
+        });
+      } else if (type == _SearchType.album) {
         final albums = await widget.api.searchAlbums(keywords);
         if (!_isCurrentSearch(serial, keywords, type, platform)) return;
         setState(() {
           _albums = albums;
           _results = const [];
+          _playlists = const [];
         });
       } else {
         final songs = switch (platform) {
@@ -226,6 +236,7 @@ class _SearchPageState extends State<SearchPage> {
         setState(() {
           _results = songs;
           _albums = const [];
+          _playlists = const [];
         });
       }
       // 搜索成功后记录历史
@@ -238,6 +249,7 @@ class _SearchPageState extends State<SearchPage> {
         setState(() {
           _results = const [];
           _albums = const [];
+          _playlists = const [];
         });
       }
     } finally {
@@ -359,6 +371,20 @@ class _SearchPageState extends State<SearchPage> {
     if (text.isNotEmpty && _searched) {
       _search(text);
     }
+  }
+
+  /// 打开搜索到的歌单。
+  void _openPlaylistResult(PlaylistSummary playlist) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PlaylistDetailPage(
+          api: widget.api,
+          auth: widget.auth,
+          player: widget.player,
+          playlist: playlist,
+        ),
+      ),
+    );
   }
 
   /// 打开专辑：复用歌单详情页展示专辑曲目。
@@ -739,6 +765,15 @@ class _SearchPageState extends State<SearchPage> {
         _searched && text.isNotEmpty && text == _lastSearchedKeyword;
 
     if (showResults) {
+      if (_type == _SearchType.playlist) {
+        return _playlists.isEmpty
+            ? _EmptyResults(keyword: text)
+            : _PlaylistResults(
+                playlists: _playlists,
+                onTap: _openPlaylistResult,
+                controller: _resultsScrollController,
+              );
+      }
       if (_type == _SearchType.album) {
         return _albums.isEmpty
             ? _EmptyResults(keyword: text)
@@ -1089,7 +1124,11 @@ class _TypeSelector extends StatelessWidget {
                 vertical: 7,
               ),
               child: Text(
-                t == _SearchType.song ? '单曲' : '专辑',
+                switch (t) {
+                  _SearchType.song => '单曲',
+                  _SearchType.album => '专辑',
+                  _SearchType.playlist => '歌单',
+                },
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: type == t
                       ? (isDark ? Colors.white : colorScheme.primary)
@@ -1485,6 +1524,121 @@ class _CategoryKeywordList extends StatelessWidget {
       3 => const Color(0xFFFFB020),
       _ => colorScheme.onSurfaceVariant,
     };
+  }
+}
+
+/// 歌单搜索结果列表。
+class _PlaylistResults extends StatelessWidget {
+  const _PlaylistResults({
+    required this.playlists,
+    required this.onTap,
+    this.controller,
+  });
+
+  final List<PlaylistSummary> playlists;
+  final ValueChanged<PlaylistSummary> onTap;
+  final ScrollController? controller;
+
+  static String _playCount(int? count) {
+    if (count == null || count <= 0) return '';
+    if (count >= 100000000) {
+      return '${(count / 100000000).toStringAsFixed(1)}亿';
+    }
+    if (count >= 10000) return '${(count / 10000).toStringAsFixed(1)}万';
+    return '$count';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView.separated(
+      controller: controller,
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 140),
+      itemCount: playlists.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 14),
+      itemBuilder: (context, index) {
+        final playlist = playlists[index];
+        final plays = _playCount(playlist.playCount);
+        final subtitle = [
+          if (playlist.songCount != null && playlist.songCount! > 0)
+            '${playlist.songCount} 首',
+          if (plays.isNotEmpty) '播放 $plays',
+          if (playlist.subtitle != null && playlist.subtitle!.isNotEmpty)
+            playlist.subtitle!,
+        ].join(' · ');
+        return InkWell(
+          onTap: () => onTap(playlist),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: (playlist.coverUrl != null &&
+                          playlist.coverUrl!.isNotEmpty)
+                      ? Image.network(
+                          playlist.coverUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => Container(
+                            color: scheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.queue_music_rounded,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      : Container(
+                          color: scheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.queue_music_rounded,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      playlist.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                    if (subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: scheme.outline,
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 

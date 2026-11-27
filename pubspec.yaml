@@ -1,7 +1,7 @@
 name: kgka_music_hl
 description: "贰悦 - 支持第三方音源的音乐播放器"
 publish_to: 'none'
-version: 3.19.3
+version: 3.21.0
 
 environment:
   sdk: ^3.11.5

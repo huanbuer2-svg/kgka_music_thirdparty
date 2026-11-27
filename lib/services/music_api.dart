@@ -1282,6 +1282,44 @@ class MusicApi {
         .toList();
   }
 
+  /// 搜索歌单（酷狗官方接口，字段与推荐歌单不同，单独转）。
+  Future<List<PlaylistSummary>> searchPlaylists(
+    String keywords, {
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final uri = Uri.parse(
+      'http://mobilecdnbj.kugou.com/api/v3/search/special',
+    ).replace(
+      queryParameters: {
+        'keyword': keywords,
+        'page': '$page',
+        'pagesize': '$pageSize',
+      },
+    );
+    final raw = await _client.getRaw(uri);
+    final json = asMap(raw);
+    final data = asMap(json['data']);
+    final list = asList(data['info']);
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map((item) {
+          final id = asString(item['specialid']) ?? '';
+          return PlaylistSummary(
+            id: id,
+            title: asString(item['specialname']) ?? '未命名歌单',
+            subtitle: asString(item['nickname']),
+            coverUrl: normalizeImageUrl(asString(item['imgurl'])),
+            songCount: asInt(item['songcount']),
+            playCount: asInt(item['playcount']),
+            // 标上来源 ID，避免被当成收藏专辑走错分支
+            sourceGlobalId: id,
+          );
+        })
+        .where((playlist) => playlist.id.isNotEmpty)
+        .toList();
+  }
+
   /// 搜索网易云歌曲。
   ///
   /// 使用独立的网易云 API（`wyy.music.api.hoilai.cn`）：
