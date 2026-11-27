@@ -1322,6 +1322,24 @@ class MusicApi {
     return (value == null || value.isEmpty) ? null : value;
   }
 
+  /// QQ 登录态里的 uin（cookie 里是 wxuin 或 uin）。
+  String? _qqUin() {
+    final cookie = PlatformAccountStore.instance.cookieOf(PlatformAccount.qq);
+    if (cookie == null || cookie.isEmpty) return null;
+    final uin = PlatformAccountStore.pickCookieValue(cookie, 'wxuin') ??
+        PlatformAccountStore.pickCookieValue(cookie, 'uin');
+    return (uin == null || uin.isEmpty) ? null : uin;
+  }
+
+  /// cookie 里的 tmeLoginType（QQ 登录一般是 1）。
+  String? _qqLoginType() {
+    final cookie = PlatformAccountStore.instance.cookieOf(PlatformAccount.qq);
+    if (cookie == null || cookie.isEmpty) return null;
+    final value =
+        PlatformAccountStore.pickCookieValue(cookie, 'tmeLoginType');
+    return (value == null || value.isEmpty) ? null : value;
+  }
+
   /// 带登录态的关键词搜歌单（`songlist`）。
   Future<List<PlaylistSummary>> _searchPlaylistsQqKeyword(
     String keywords, {
@@ -1345,18 +1363,34 @@ class MusicApi {
     final result = <PlaylistSummary>[];
     for (final item in list) {
       if (item is! Map) continue;
+      // 带登录态时返回扁平结构（dissid/dissname/imgurl/song_count），
+      // 走广场时才是 {Playlist: {basic}}，两种都要认。
+      final flatId = asString(item['dissid']);
+      if (flatId != null && flatId.isNotEmpty) {
+        final creator = asMap(item['creator']);
+        result.add(
+          PlaylistSummary(
+            id: flatId,
+            title: asString(item['dissname']) ?? '未命名歌单',
+            subtitle: asString(creator['name']),
+            coverUrl: normalizeImageUrl(asString(item['imgurl'])),
+            songCount: asInt(item['song_count']),
+            playCount: asInt(item['listennum']),
+            sourceGlobalId: flatId,
+          ),
+        );
+        continue;
+      }
       final basic = asMap(asMap(item['Playlist'])['basic']);
       final tid = asString(basic['tid']);
       final title = asString(basic['title']);
       if (tid == null || tid.isEmpty || title == null) continue;
       final creator = asMap(basic['creator']);
-      final content = asMap(asMap(item['Playlist'])['content']);
       result.add(
         PlaylistSummary(
           id: tid,
           title: title,
           subtitle: asString(creator['nick']),
-          songCount: asInt(content['song_cnt']) ?? asInt(basic['song_cnt']),
           sourceGlobalId: tid,
         ),
       );
@@ -1528,6 +1562,10 @@ class MusicApi {
         'ct': 24,
         'cv': 0,
         if (authst != null) 'authst': authst,
+        // 只带 authst 是拿不到 songlist 的，uin 和 tmeLoginType 必须一起给
+        if (_qqUin() != null) 'uin': _qqUin(),
+        if (_qqLoginType() != null)
+          'tmeLoginType': int.tryParse(_qqLoginType()!) ?? 1,
       },
       'req': {'module': module, 'method': method, 'param': param},
     });
