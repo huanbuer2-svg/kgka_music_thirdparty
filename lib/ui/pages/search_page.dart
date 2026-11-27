@@ -23,6 +23,7 @@ import '../widgets/scroll_to_top_button.dart';
 import '../adaptive_layout.dart';
 import 'artist_detail_page.dart';
 import 'playlist_detail_page.dart';
+import 'qq_playlist_page.dart';
 import 'song_detail_page.dart';
 import 'dart:math' as math;
 
@@ -378,6 +379,19 @@ class _SearchPageState extends State<SearchPage> {
 
   /// 打开搜索到的歌单。
   void _openPlaylistResult(PlaylistSummary playlist) {
+    // QQ 歌单走老 web 接口，版式与通用详情页不同，单独一个轻量页
+    if (_platform == _SearchPlatform.qq) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => QqPlaylistPage(
+            api: widget.api,
+            player: widget.player,
+            playlist: playlist,
+          ),
+        ),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => PlaylistDetailPage(
@@ -768,13 +782,6 @@ class _SearchPageState extends State<SearchPage> {
 
     if (showResults) {
       if (_type == _SearchType.playlist) {
-        if (_playlists.isEmpty && _platform == _SearchPlatform.qq) {
-          return _PlatformUnsupported(
-            message: 'QQ 的歌单搜索需要登录态，暂时取不到结果',
-            hint: '可以切到「网易云」或「酷狗」再搜歌单',
-            onSwitch: () => _switchPlatform(_SearchPlatform.netease),
-          );
-        }
         return _playlists.isEmpty
             ? _EmptyResults(keyword: text)
             : _PlaylistResults(
@@ -1533,58 +1540,6 @@ class _CategoryKeywordList extends StatelessWidget {
       3 => const Color(0xFFFFB020),
       _ => colorScheme.onSurfaceVariant,
     };
-  }
-}
-
-/// 某些平台不支持某类搜索时的说明页。
-class _PlatformUnsupported extends StatelessWidget {
-  const _PlatformUnsupported({
-    required this.message,
-    required this.hint,
-    this.onSwitch,
-  });
-
-  final String message;
-  final String hint;
-  final VoidCallback? onSwitch;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.info_outline_rounded, size: 40, color: scheme.outline),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13.5,
-                color: scheme.onSurfaceVariant,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              hint,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11.5, color: scheme.outline),
-            ),
-            if (onSwitch != null) ...[
-              const SizedBox(height: 16),
-              FilledButton.tonal(
-                onPressed: onSwitch,
-                child: const Text('切到网易云'),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 }
 

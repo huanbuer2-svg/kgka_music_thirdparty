@@ -1293,8 +1293,9 @@ class MusicApi {
       case 'netease':
         return _searchPlaylistsNetease(keywords, limit: pageSize);
       case 'qq':
-        // QQ 的 songlist 需要额外的 grp/search_type 组合，暂未打通
-        return const [];
+        // QQ 没有免登录的关键词歌单搜索（songlist 恒为空），
+        // 用歌单广场的热门列表顶上，点进去能正常打开。
+        return _qqSquarePlaylists(limit: pageSize);
       default:
         return _searchPlaylistsKugou(
           keywords,
@@ -1302,6 +1303,126 @@ class MusicApi {
           pageSize: pageSize,
         );
     }
+  }
+
+  /// QQ 歌单广场（热门歌单）。
+  ///
+  /// 说明：QQ 的 `SearchCgiService` 在未登录时 songlist 恒为空
+  /// （estimate_sum 有值但 list 不返回），所以这里拿广场推荐。
+  Future<List<PlaylistSummary>> _qqSquarePlaylists({int limit = 20}) async {
+    final data = await _musicu(
+      module: 'music.playlist.PlaylistSquare',
+      method: 'GetRecommendFeed',
+      param: {'From': 0, 'Size': limit, 'Start': 0},
+    );
+    final list = asList(data['List']);
+    final result = <PlaylistSummary>[];
+    for (final item in list) {
+      if (item is! Map) continue;
+      final playlist = asMap(item['Playlist']);
+      final basic = asMap(playlist['basic']);
+      final tid = asString(basic['tid']);
+      final title = asString(basic['title']);
+      if (tid == null || tid.isEmpty || title == null) continue;
+      final creator = asMap(basic['creator']);
+      result.add(
+        PlaylistSummary(
+          id: tid,
+          title: title,
+          subtitle: asString(creator['nick']),
+          sourceGlobalId: tid,
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// QQ 歌单里的歌曲（老 web 接口，不需要签名）。
+  Future<List<Song>> qqPlaylistSongs(String disstid) async {
+    final uri = Uri.parse(
+      'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg',
+    ).replace(
+      queryParameters: {
+        'type': '1',
+        'json': '1',
+        'utf8': '1',
+        'onlysong': '0',
+        'disstid': disstid,
+        'format': 'jsonp',
+        'g_tk': '5381',
+        'jsonpCallback': 'playlistinfoCallback',
+        'loginUin': '0',
+        'hostUin': '0',
+        'inCharset': 'utf8',
+        'outCharset': 'utf-8',
+        'platform': 'yqq',
+        'needNewCode': '0',
+      },
+    );
+    final raw = await _client.getRaw(
+      uri,
+      headers: {'Referer': 'https://y.qq.com/'},
+    );
+    final text = raw is String ? raw : '$raw';
+    // jsonp: playlistinfoCallback({...})
+    final start = text.indexOf('(');
+    final end = text.lastIndexOf(')');
+    if (start < 0 || end <= start) return const [];
+    final decoded = jsonDecode(text.substring(start + 1, end));
+    if (decoded is! Map) return const [];
+    final cdlist = asList(decoded['cdlist']);
+    if (cdlist.isEmpty) return const [];
+    final songs = asList(asMap(cdlist.first)['songlist']);
+    final result = <Song>[];
+    for (final item in songs) {
+      if (item is! Map) continue;
+      final mid = asString(item['songmid']);
+      if (mid == null || mid.isEmpty) continue;
+      final singers = asList(item['singer'])
+          .whereType<Map>()
+          .map((s) => asString(s['name']) ?? '')
+          .where((name) => name.isNotEmpty)
+          .join(' / ');
+      result.add(
+        Song(
+          id: mid,
+          title: asString(item['songname']) ?? '未知歌曲',
+          artist: singers.isEmpty ? '未知艺人' : singers,
+          hash: '',
+          albumName: asString(item['albumname']),
+          coverUrl: asString(item['albummid']) == null
+              ? null
+              : 'https://y.qq.com/music/photo_new/T002R300x300M000'
+                  '${asString(item['albummid'])}.jpg',
+          source: SongSource.qq,
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// 调 musicu.fcg 并取出 req.data。
+  Future<Map<String, dynamic>> _musicu({
+    required String module,
+    required String method,
+    required Map<String, Object?> param,
+  }) async {
+    final body = jsonEncode({
+      'comm': {'ct': 24, 'cv': 0},
+      'req': {'module': module, 'method': method, 'param': param},
+    });
+    final postResp = await http
+        .post(
+          Uri.parse('https://u.y.qq.com/cgi-bin/musicu.fcg'),
+          headers: {
+            'Referer': 'https://y.qq.com/',
+            'Content-Type': 'application/json',
+          },
+          body: body,
+        )
+        .timeout(const Duration(seconds: 20));
+    final json = asMap(jsonDecode(utf8.decode(postResp.bodyBytes)));
+    return asMap(asMap(json['req'])['data']);
   }
 
   /// 酷狗歌单搜索（官方接口，字段和推荐歌单不一样）。
